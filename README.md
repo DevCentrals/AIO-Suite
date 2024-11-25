@@ -123,7 +123,8 @@ Validating Emails:
 The ValidMailChecker class checks if an email is valid using the check_validmail function. This function is executed for each email during the validation process.
 
 Directory Structure
-project/
+```
+AIO-Suite/
 │
 ├── app.py                       # Main Flask application
 ├── database.py                  # Database models and setup
@@ -134,7 +135,7 @@ project/
 ├── templates/                   # HTML templates
 ├── static/                      # Static files (e.g., CSS, JavaScript)
 └── proxies.txt                  # List of proxy servers for email processing
-
+```
 Routes
 GET /: Display the uploaded emails and their processing statuses.
 POST /upload: Upload a file containing email addresses.
