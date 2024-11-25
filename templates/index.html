@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modern Email Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/styles.css') }}" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="https://cdn.socket.io/4.3.2/socket.io.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  </head>
+  <body>
+    <div id="overlay" class="overlay">
+        <div class="message">Loading, please wait...</div>
+        <div class="spinner"></div>
+        <div id="progress-message" class="progress-message">Initializing...</div>
+        <button class="close-btn" onclick="closeOverlay()">X</button>
+    </div>
+  
+    <button id="open-panel-btn" class="btn vertical-button">Modules</button>
+    <div id="module-panel" class="slide-in-panel">
+      <div class="panel-content">
+        <h3>Recovery Modules</h3>
+        <ul id="recovery-module-list"></ul>
+        <h3>Valid-Mail Modules</h3>
+        <ul id="vm-module-list"></ul>
+        <button id="close-panel-btn" class="btn btn-danger w-100">Close</button>
+      </div>
+    </div>
+    <div class="sidebar">
+      <h3>Email Dashboard</h3>
+      <ul>
+        <li><a href="#" data-bs-toggle="modal" data-bs-target="#filterModal">Filters</a></li>
+        <li><a href="#" data-bs-toggle="modal" data-bs-target="#uploadModal">Upload Emails</a></li>
+        <li><a href="#" onclick="performLookup()">Perform Lookup</a></li>
+        <li><a href="#" onclick="performRecoveryCheck()">Recovery Check</a></li>
+        <li><a href="#" id="perform-validmailcheck-btn" data-bs-toggle="modal" data-bs-target="#validMailModal">ValidMail Check</a></li>
+        <li><a href="#" onclick="exportToCSV()">Export</a></li>
+        <li><a href="#" data-bs-toggle="modal" data-bs-target="#settingsModal" onclick="loadSettings()">Settings</a></li>
+      </ul>
+    </div>
+    <div class="content">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Dashboard</h2>
+        <span id="total-records"></span>
+      </div>
+      <div class="card p-3 mb-3">
+        <table class="table table-bordered table-striped">
+          <thead>
+            <tr>
+              <th><input type="checkbox" id="select_all" onclick="toggleSelectAll()"></th>
+              <th>Email</th>
+              <th>Status</th>
+              <th>Name</th>
+              <th>Numbers</th>
+              <th>Address</th>
+              <th>DOB</th>
+              <th>VM Results</th>
+            </tr>
+          </thead>
+          <tbody id="email-table-body"></tbody>
+        </table>
+      </div>
+      
+      <div class="mb-3">
+        <label for="threads" class="form-label">Set Threads</label>
+        <input type="number" name="threads" id="threads" class="form-control">
+      </div>
+
+      <div class="form-check mb-3">
+        <input type="checkbox" class="form-check-input" id="execute-all">
+        <label class="form-check-label" for="execute-all">Execute All</label>
+      </div>
+      
+      <nav>
+        <ul class="pagination" id="pagination"></ul>
+      </nav>
+    </div>
+
+    <div class="modal fade" id="filterModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Filters</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <form id="filter-form" onsubmit="applyFilters(); return false;">
+              <div class="mb-3">
+                <input type="text" id="filter-domain" name="domain" placeholder="Filter by domain" class="form-control">
+              </div>
+              <div class="mb-3">
+                <label for="status-filter" class="form-label">Status</label>
+                <select id="status-filter" class="form-control">
+                  <option value="">-- All --</option>
+                </select>
+              </div>
+              <div class="mb-3">
+                <label for="module-filter" class="form-label">Modules</label>
+                <select id="module-filter" class="form-control" multiple></select>
+              </div>
+              <button type="submit" class="btn btn-primary w-100">Apply Filters</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade" id="settingsModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">Settings</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <form id="settings-form">
+                <div id="settings-content"></div>
+              </form>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+              <button type="button" class="btn btn-primary" onclick="saveSettings()">Save Changes</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+    <div class="modal fade" id="uploadModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Upload Emails</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div id="drop-area" class="border p-4 text-center">
+              <p>Drag and drop your email file here, or click to select a file</p>
+              <input type="file" id="email_file" name="email_file" class="form-control d-none" accept=".csv, .txt">
+            </div>
+            <button type="button" class="btn btn-primary mt-3 w-100" id="upload-btn">Upload Emails</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal fade" id="validMailModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">ValidMail Modules</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body" id="validmail-module-selection-body"></div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            <button type="button" class="btn btn-primary" id="validmail-modal-submit-btn">Perform ValidMail Check</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+  </body>
+</html>
