@@ -137,6 +137,7 @@ AIO-Suite/
 └── proxies.txt                  # List of proxy servers for email processing
 ```
 Routes
+```
 GET /: Display the uploaded emails and their processing statuses.
 POST /upload: Upload a file containing email addresses.
 GET /get_modules: Fetch a list of available modules.
@@ -146,8 +147,9 @@ POST /perform_recovery_check: Perform a recovery check for selected emails.
 GET /get_settings: Retrieve current settings.
 POST /update_settings: Update settings.
 GET /api/settings/<key>: Get a specific setting by key.
+```
 
-Contributing
+
 Feel free to fork the repository, make changes, and create pull requests. Contributions are always welcome!
 
 License
