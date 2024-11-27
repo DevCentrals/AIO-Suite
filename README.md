@@ -77,16 +77,21 @@ class EmailProcessor:
     def __init__(self):
         self.name = "domain.com"  # Name of the domain or module
         self.developer = "Developer-Name"  # Developer name
+
+    @staticmethod
+    def required_settings():
+        return ["capsolver_key"]
     
     def supports_domain(self, domain):
         """ Checks if the domain is supported by the processor """
         supported_prefixes = ["domain."]
         return any(domain.startswith(prefix) for prefix in supported_prefixes)
 
-    def process_task(self, task_obj, proxy, capsolver_key):
+    def process_task(self, task_obj, settings, proxy):
         """ Process the task and return the result (e.g., matched number or None) """
         # Implement the task processing logic here
         # Example: return matched phone number or None
+        self.capsolver_key = settings.get("capsolver_key")
         return task_obj['numbers'][0] if task_obj['numbers'] else None
 
 ```
@@ -103,11 +108,16 @@ class ValidMailChecker:
         self.name = "domain.com"  # Name of the domain or module
         self.developer = "Developer-Name"  # Developer name
 
-    def check_validmail(self, email, capsolver_key, proxy):
+    @staticmethod
+    def required_settings():
+        return ["capsolver_key"]
+
+    def check_validmail(self, email, settings, proxy):
         """ Checks the validity of the email address """
         self.capsolver_key = capsolver_key
         self.proxy = proxy
         # Implement validation logic here (e.g., use external API or algorithm)
+        self.capsolver_key = settings.get("capsolver_key")
         return True  # Return True for a valid email, False otherwise
 
 ```
