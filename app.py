@@ -1,22 +1,19 @@
-# Standard library imports
 import os
 import time
-import random
 import json
 import inspect
 import importlib
 import re
 import concurrent.futures
 
-# Third-party imports
 from flask import Flask, render_template, request, redirect, url_for, jsonify, current_app
 from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO, emit
 import requests
 from sqlalchemy import func
 
-# Local application imports
 from database import db, Email, Settings
+from utils import get_proxy, load_all_proxies
 
 app = Flask(__name__)
 
@@ -31,52 +28,7 @@ MAX_RETRIES = 3
 TASK_TIMEOUT = 30
 RETRY_DELAY_SECONDS = 2
 
-def load_all_proxies() -> list[str]:
-    proxies = []
-    with open('proxies.txt') as f:
-        proxies = f.read().splitlines()
-
-    formatted_proxies = []
-    for proxy in proxies:
-        try:
-            proxy = f"http://{proxy}"
-            formatted_proxies.append(proxy)
-        except:
-            pass
-    return formatted_proxies
-
-def get_proxy(proxies):
-    return random.choice(proxies)
-
-def load_modules(folder_path):
-    modules = {}
-    for file_name in os.listdir(folder_path):
-        if file_name.endswith(".py"):
-            module_name = file_name[:-3]
-            module_path = f"{folder_path}.{module_name}"
-            try:
-                module = importlib.import_module(module_path)
-                modules[module_name] = module
-            except ImportError as e:
-                print(f"Failed to import module {module_name}: {e}")
-    return modules
-
-def find_email_supporting_classes(module):
-    email_supported_classes = []
-    for name, obj in inspect.getmembers(module):
-        if inspect.isclass(obj) and hasattr(obj, 'supports_email') and obj.supports_email:
-            email_supported_classes.append(obj)
-    return email_supported_classes
-
-def find_email_supporting_module(email, modules, additional_modules):
-    domain = email.split('@')[-1]
-    for module_name, module in modules.items():
-        email_supported_classes = find_email_supporting_classes(module)
-        for class_obj in email_supported_classes:
-            instance = class_obj()
-            if instance.supports_domain(domain):
-                return module_name, class_obj
-    return None, None
+directories = ['modules', 'additional_modules', 'validmail_modules', 'instance']
 
 def get_details(session, proxies, SearchAPI_key, email, retries=MAX_RETRIES):
     url = f'https://search-api.dev/search.php?email={email}&api_key={SearchAPI_key}'
@@ -125,6 +77,53 @@ def convert_to_american_format(phone_number: str) -> str:
         return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
     return phone_number
 
+def load_modules(folder_path):
+    modules = {}
+    for file_name in os.listdir(folder_path):
+        if file_name.endswith(".py"):
+            module_name = file_name[:-3]
+            module_path = f"{folder_path}.{module_name}"
+            try:
+                module = importlib.import_module(module_path)
+                modules[module_name] = module
+            except ImportError as e:
+                print(f"Failed to import module {module_name}: {e}")
+    return modules
+
+def get_required_settings(modules):
+    required_settings = {}
+    for module_name, module in modules.items():
+        if hasattr(module, 'ValidMailChecker'):
+            checker_class = getattr(module, 'ValidMailChecker')
+            if hasattr(checker_class, 'required_settings'):
+                settings = checker_class.required_settings()
+                required_settings[module_name] = settings
+        
+        if hasattr(module, 'EmailProcessor'):
+            processor_class = getattr(module, 'EmailProcessor')
+            if hasattr(processor_class, 'required_settings'):
+                settings = processor_class.required_settings()
+                required_settings[module_name] = settings
+    
+    return required_settings
+
+def find_email_supporting_classes(module):
+    email_supported_classes = []
+    for name, obj in inspect.getmembers(module):
+        if inspect.isclass(obj) and hasattr(obj, 'supports_email') and obj.supports_email:
+            email_supported_classes.append(obj)
+    return email_supported_classes
+
+def find_email_supporting_module(email, modules, additional_modules):
+    domain = email.split('@')[-1]
+    for module_name, module in modules.items():
+        email_supported_classes = find_email_supporting_classes(module)
+        for class_obj in email_supported_classes:
+            instance = class_obj()
+            if instance.supports_domain(domain):
+                return module_name, class_obj
+    return None, None
+
 @app.route('/')
 def index():
     emails = Email.query.all()
@@ -171,7 +170,7 @@ def get_modules():
                         module_info.append({
                             'name': processor_instance.name,
                             'developer': processor_instance.developer,
-                            'module_name': module_name  # Adding actual module name
+                            'module_name': module_name
                         })
         else:
             print("Error: Expected dictionaries for modules, but got something else.")
@@ -206,16 +205,22 @@ def perform_vm_check():
 
     loaded_modules = load_modules('validmail_modules')
     proxies = load_all_proxies()
-    capsolver_key = Settings.get_setting('capsolver_key')
-    if not capsolver_key:
-        return jsonify({'error': 'Capsolver API key not found in settings'}), 400
-
     max_concurrent_tasks = int(request.json['threads'])
 
     socketio.emit('task_status', {'status': 'Valid-Mail check started...'})
 
     if not selected_modules:
         selected_modules = list(loaded_modules.keys())
+
+    module_settings = {}
+    for module_name in selected_modules:
+        if module_name in loaded_modules:
+            required_settings = loaded_modules[module_name].ValidMailChecker.required_settings()
+            module_settings[module_name] = {
+                setting: Settings.get_setting(setting)
+                for setting in required_settings
+                if Settings.get_setting(setting) is not None
+            }
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent_tasks) as executor:
         futures = {}
@@ -229,7 +234,7 @@ def perform_vm_check():
                     loaded_modules,
                     selected_modules,
                     proxies,
-                    capsolver_key
+                    module_settings
                 )] = email_record
 
         for future in concurrent.futures.as_completed(futures):
@@ -241,15 +246,14 @@ def perform_vm_check():
 
     return jsonify({'success': True, 'results': validmail_results})
 
-def process_email_for_validmail_check(app, email_record, loaded_modules, selected_modules, proxies, capsolver_key, max_retries=3):
-    with app.app_context():       
-        validmail_modules = {}
-        for module_name in selected_modules:
-            if module_name in loaded_modules:
-                validmail_modules[module_name] = loaded_modules[module_name]
-        
-        phone_numbers = email_record.phone_numbers
+def process_email_for_validmail_check(app, email_record, loaded_modules, selected_modules, proxies, module_settings, max_retries=3):
+    with app.app_context():
+        validmail_modules = {
+            module_name: loaded_modules[module_name]
+            for module_name in selected_modules if module_name in loaded_modules
+        }
 
+        phone_numbers = email_record.phone_numbers
         if isinstance(phone_numbers, str):
             phone_numbers = [num.strip() for num in phone_numbers.split(';')]
 
@@ -269,19 +273,24 @@ def process_email_for_validmail_check(app, email_record, loaded_modules, selecte
             if email_record.validmail_results and module_name in email_record.validmail_results:
                 print(f"Email {task_obj['email']} already processed for {module_name}, skipping...")
                 continue
-                
+
             processor_class = getattr(module, 'ValidMailChecker', None)
             if processor_class is None:
                 print(f"No ValidMailChecker class found in module {module_name}")
                 continue
-            
+
             instance = processor_class()
-            
+            settings_for_module = module_settings.get(module_name, {})
+
             proxy_retry_count = 0
             while proxy_retry_count < max_retries:
                 try:
                     proxy = get_proxy(proxies)
-                    is_valid_mail = instance.check_validmail(task_obj['email'], capsolver_key, proxy)
+                    is_valid_mail = instance.check_validmail(
+                        task_obj['email'],
+                        settings_for_module,
+                        proxy
+                    )
                     email = db.session.query(Email).filter_by(email=task_obj['email']).first()
                     if email:
                         email.update_validmail_results(module_name, is_valid_mail)
@@ -308,10 +317,9 @@ def process_email_for_validmail_check(app, email_record, loaded_modules, selecte
 
             if proxy_retry_count == max_retries:
                 print(f"Failed to process task for {task_obj['email']} with module {module_name} after {max_retries} retries.")
-        
+
             tasks.append(task_obj)
         return tasks
-
 
 @app.route('/perform_lookup', methods=['POST'])
 def perform_lookup():
@@ -322,7 +330,7 @@ def perform_lookup():
         proxies = load_all_proxies()
         SearchAPI_key_key = Settings.get_setting('search_api_key')
         if not SearchAPI_key_key:
-            return jsonify({'error': 'Capsolver API key not found in settings'}), 400
+            return jsonify({'error': 'Search API key not found in settings'}), 400
         max_concurrent_tasks = int(request.json['threads'])
 
         socketio.emit('task_status', {'status': 'Task started, processing...'})
@@ -332,7 +340,7 @@ def perform_lookup():
             for email in emails_to_lookup:
                 email_record = db.session.query(Email).filter_by(email=email).first()
                 if email_record:
-                    futures[executor.submit(process_email_for_lookup, email_record.email, proxies, SearchAPI_key)] = email_record
+                    futures[executor.submit(process_email_for_lookup, email_record.email, proxies, SearchAPI_key_key)] = email_record
 
             for future in concurrent.futures.as_completed(futures):
                 result = future.result()
@@ -391,7 +399,6 @@ def get_emails():
         'statuses': status_list
     })
 
-
 @app.route('/perform_recovery_check', methods=['POST'])
 def perform_recovery_check():
     emails_to_lookup = request.json['selected_emails']
@@ -400,9 +407,19 @@ def perform_recovery_check():
     loaded_modules = load_modules('modules')
     additional_modules = load_modules('additional_modules')
     proxies = load_all_proxies()
-    capsolver_key = Settings.get_setting('capsolver_key')
-    if not capsolver_key:
-        return jsonify({'error': 'Capsolver API key not found in settings'}), 400
+    
+    all_modules = {**loaded_modules, **additional_modules}
+    
+    required_settings = get_required_settings(all_modules)
+    
+    module_settings = {}
+    for module_name, module in all_modules.items():
+        module_required_settings = required_settings.get(module_name, [])
+        module_settings[module_name] = {
+            setting: Settings.get_setting(setting)
+            for setting in module_required_settings
+            if Settings.get_setting(setting) is not None
+        }
 
     max_concurrent_tasks = int(request.json['threads'])
 
@@ -420,7 +437,7 @@ def perform_recovery_check():
                     loaded_modules,
                     additional_modules, 
                     proxies, 
-                    capsolver_key
+                    module_settings
                 )] = email_record
 
         for future in concurrent.futures.as_completed(futures):
@@ -432,7 +449,7 @@ def perform_recovery_check():
 
     return redirect(url_for('index'))
 
-def process_email_for_recovery_check(app, email_record, loaded_modules, additional_modules, proxies, capsolver_key, max_retries=3):
+def process_email_for_recovery_check(app, email_record, loaded_modules, additional_modules, proxies, module_settings, max_retries=3):
     with app.app_context():
         phone_numbers = email_record.phone_numbers
 
@@ -459,18 +476,20 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
                     proxy_retry_count = 0
                     while proxy_retry_count < max_retries:
                         try:
+                            module_specific_settings = module_settings.get(module_name, {})
                             proxy = get_proxy(proxies)
-                            censored_number = instance.process_task(task_obj, proxy, capsolver_key)
+
+                            censored_number = instance.process_task(task_obj, module_specific_settings, proxy)
 
                             if censored_number:
                                 print(f"Matched censored number for {task_obj['email']}: {censored_number}")
-                                
+
                                 email = db.session.query(Email).filter_by(email=task_obj['email']).first()
                                 if email:
                                     phone_numbers = [censored_number]
                                     email.update_recovery_check(phone_numbers)
                                     print(f"Updated phone number for {task_obj['email']}: {phone_numbers}")
-                                    
+
                                     email_result = {
                                         'email': task_obj['email'],
                                         'name': email.name or 'N/A',
@@ -493,7 +512,10 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
                                         if instance.supports_domain(email_record.email.split('@')[-1]):
                                             module_base_name = additional_module.__name__.split('.')[-1]
                                             print(f"Processing task with {module_base_name}")
-                                            censored_number = instance.process_task(task_obj, proxy, capsolver_key)
+                                        
+                                            module_specific_settings = module_settings.get(additional_module_name, {})
+                                            censored_number = instance.process_task(task_obj, module_specific_settings, proxy)
+
                                             if censored_number:
                                                 print(f"Matched censored number for {task_obj['email']}: {censored_number}")
                                                 email = db.session.query(Email).filter_by(email=task_obj['email']).first()
@@ -501,7 +523,7 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
                                                     phone_numbers = [censored_number]
                                                     email.update_recovery_check(phone_numbers)
                                                     print(f"Updated phone number for {task_obj['email']}: {phone_numbers}")
-                                                    
+
                                                     email_result = {
                                                         'email': task_obj['email'],
                                                         'name': email.name or 'N/A',
@@ -521,7 +543,7 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
 
                     if proxy_retry_count == max_retries:
                         print(f"Failed to process task for {task_obj['email']} with module {class_obj.__name__} after {max_retries} retries.")
-                
+
                     tasks.append(task_obj)
 
         if not domain_found_in_module:
@@ -535,7 +557,8 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
                         while proxy_retry_count < max_retries:
                             try:
                                 proxy = get_proxy(proxies)
-                                censored_number = instance.process_task(task_obj, proxy, capsolver_key)
+                                module_specific_settings = module_settings.get(additional_module_name, {})
+                                censored_number = instance.process_task(task_obj, module_specific_settings, proxy)
 
                                 if censored_number:
                                     print(f"Matched censored number for {task_obj['email']}: {censored_number}")
@@ -545,7 +568,7 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
                                         phone_numbers = [censored_number]
                                         email.update_recovery_check(phone_numbers)
                                         print(f"Updated phone number for {task_obj['email']}: {phone_numbers}")
-                                        
+
                                         email_result = {
                                             'email': task_obj['email'],
                                             'name': email.name or 'N/A',
@@ -568,7 +591,7 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
 
                         if proxy_retry_count == max_retries:
                             print(f"Failed to process task for {task_obj['email']} with additional module {class_obj.__name__} after {max_retries} retries.")
-                
+
         return tasks
 
 @app.route('/get_settings', methods=['GET'])
@@ -608,14 +631,17 @@ def handle_connect():
 def handle_disconnect():
     print("Client disconnected!")
 
+for directory in directories:
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
 
         default_settings = {
             'threads': '10',
-            'search_api_key': '',
-            'capsolver_key': ''
+            'search_api_key': ''
         }
 
         for key, value in default_settings.items():
@@ -623,4 +649,14 @@ if __name__ == "__main__":
                 db.session.add(Settings(key=key, value=value))
         db.session.commit()
         
+        modules = load_modules('validmail_modules')
+
+        required_settings = get_required_settings(modules)
+
+        for module_name, settings in required_settings.items():
+            for setting in settings:
+                if not Settings.query.filter_by(key=setting).first():
+                    db.session.add(Settings(key=setting, value=""))
+        db.session.commit()
+
     socketio.run(app, debug=True)
