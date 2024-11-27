@@ -9,8 +9,10 @@ import concurrent.futures
 from flask import Flask, render_template, request, redirect, url_for, jsonify, current_app
 from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO, emit
+
 import requests
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 
 from database import db, Email, Settings
 from utils import get_proxy, load_all_proxies
@@ -138,18 +140,25 @@ def upload_emails():
         if emails:
             email_lines = emails.read().decode('utf-8').splitlines()
             valid_emails = []
+            
             for email in email_lines:
                 email = email.strip()
                 if re.match(EMAIL_REGEX, email):
                     domain = email.split('@')[-1]
-                    valid_emails.append(Email(email=email, domain=domain))
+                    
+                    existing_email = Email.query.filter_by(email=email).first()
+                    if not existing_email:
+                        valid_emails.append(Email(email=email, domain=domain))
             
             if valid_emails:
-                db.session.bulk_save_objects(valid_emails)
-                db.session.commit()
+                try:
+                    db.session.bulk_save_objects(valid_emails)
+                    db.session.commit()
+                except IntegrityError:
+                    db.session.rollback()
         
         return redirect(url_for('index'))
-
+    
 @app.route('/get_modules')
 def get_modules():
     try:

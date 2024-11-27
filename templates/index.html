@@ -127,23 +127,38 @@
         </div>
       </div>
       
-    <div class="modal fade" id="uploadModal" tabindex="-1" aria-hidden="true">
-      <div class="modal-dialog">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title">Upload Emails</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-          </div>
-          <div class="modal-body">
-            <div id="drop-area" class="border p-4 text-center">
-              <p>Drag and drop your email file here, or click to select a file</p>
-              <input type="file" id="email_file" name="email_file" class="form-control d-none" accept=".csv, .txt">
+      <div class="modal fade" id="uploadModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Upload Emails</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="drop-area" class="border p-4 text-center">
+                        <p>Drag and drop your email file here, or click to select a file</p>
+                        <input type="file" id="email_file" name="email_file" class="form-control d-none" accept=".csv, .txt" required>
+                    </div>
+    
+                    <div id="file-name-display" class="mt-3" style="display: none;">
+                        <p><strong>Selected File:</strong> <span id="file-name"></span></p>
+                    </div>
+    
+                    <form action="/upload" method="post" enctype="multipart/form-data" class="fade-in mt-3" id="upload-form">
+                        <div class="mb-4">
+                            <label for="email_file" class="form-label">Upload Email List</label>
+                            <input type="file" class="form-control" id="email-input" name="email_file" required style="display: none;">
+                        </div>
+                        <button type="submit" class="btn btn-primary" id="upload-btn" style="display: none;">Upload Emails</button>
+                    </form>
+                </div>
             </div>
-            <button type="button" class="btn btn-primary mt-3 w-100" id="upload-btn">Upload Emails</button>
-          </div>
         </div>
-      </div>
     </div>
+    
+    
+      
+      
 
     <div class="modal fade" id="validMailModal" tabindex="-1" aria-hidden="true">
       <div class="modal-dialog">

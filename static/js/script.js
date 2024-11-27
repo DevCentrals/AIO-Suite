@@ -13,6 +13,11 @@ const selectAllCheckbox = document.getElementById("select_all");
 const dropArea = document.getElementById("drop-area");
 const fileInput = document.getElementById("email_file");
 const uploadBtn = document.getElementById("upload-btn");
+const uploadForm = document.getElementById("upload-form");
+const emailInputField = document.getElementById("email-input");
+const fileNameDisplay = document.getElementById("file-name-display");
+const fileNameSpan = document.getElementById("file-name");
+
 
 const openPanelBtn = document.getElementById('open-panel-btn');
 const modulePanel = document.getElementById('module-panel');
@@ -34,17 +39,27 @@ dropArea.addEventListener("drop", (event) => {
 
     const file = event.dataTransfer.files[0];
     if (file) {
-        fileInput.files = event.dataTransfer.files;
+        emailInputField.files = event.dataTransfer.files;
+        fileNameSpan.textContent = file.name;
+        fileNameDisplay.style.display = "block";
         uploadBtn.style.display = "inline-block";
+        uploadForm.style.display = "block";
     }
-});
-
-fileInput.addEventListener("change", () => {
-    uploadBtn.style.display = "inline-block";
 });
 
 dropArea.addEventListener("click", () => {
     fileInput.click();
+});
+
+fileInput.addEventListener("change", () => {
+    if (fileInput.files.length > 0) {
+        emailInputField.files = fileInput.files;
+        const file = fileInput.files[0];
+        fileNameSpan.textContent = file.name;
+        fileNameDisplay.style.display = "block";
+        uploadBtn.style.display = "inline-block";
+        uploadForm.style.display = "block";
+    }
 });
 
 document.getElementById('open-panel-btn').addEventListener('click', function() {
