@@ -5,6 +5,9 @@ import inspect
 import importlib
 import re
 import concurrent.futures
+from typing import Dict, List, Optional, Any
+from dataclasses import dataclass
+import asyncio
 
 from flask import Flask, render_template, request, redirect, url_for, jsonify, current_app
 from flask_sqlalchemy import SQLAlchemy
@@ -29,47 +32,107 @@ db.init_app(app)
 MAX_RETRIES = 3
 TASK_TIMEOUT = 30
 RETRY_DELAY_SECONDS = 2
+DIRECTORIES = ['modules', 'additional_modules', 'validmail_modules', 'search_modules', 'instance']
+EMAIL_REGEX = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+@dataclass
+class ModuleResult:
+    success: bool
+    data: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+class ModuleLoader:
+    @staticmethod
+    def load_modules(folder_path: str) -> Dict[str, Any]:
+        modules = {}
+        if not os.path.exists(folder_path):
+            return modules
+            
+        for file_name in os.listdir(folder_path):
+            if file_name.endswith(".py"):
+                module_name = file_name[:-3]
+                module_path = f"{folder_path}.{module_name}"
+                try:
+                    module = importlib.import_module(module_path)
+                    modules[module_name] = module
+                except ImportError as e:
+                    print(f"Failed to import module {module_name}: {e}")
+        return modules
 
-directories = ['modules', 'additional_modules', 'validmail_modules', 'instance']
+    @staticmethod
+    def get_required_settings(modules: Dict[str, Any]) -> Dict[str, List[str]]:
+        required_settings = {}
+        for module_name, module in modules.items():
+            for class_name in ['ValidMailChecker', 'EmailProcessor', 'SearchAPIProcessor']:
+                if hasattr(module, class_name):
+                    checker_class = getattr(module, class_name)
+                    if hasattr(checker_class, 'required_settings'):
+                        settings = checker_class.required_settings()
+                        required_settings[module_name] = settings
+        return required_settings
 
-def get_details(session, proxies, SearchAPI_key, email, retries=MAX_RETRIES):
-    url = f'https://search-api.dev/search.php?email={email}&api_key={SearchAPI_key}'
-    headers = {
-        'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-    }
+class SearchProcessor:
+    def __init__(self):
+        self.search_modules = ModuleLoader.load_modules('search_modules')
+        self.required_settings = ModuleLoader.get_required_settings(self.search_modules)
+        
+    async def process_email(self, email: str, module_name: str, settings: Dict[str, str], proxies: List[str]) -> ModuleResult:
+        if module_name not in self.search_modules:
+            return ModuleResult(success=False, error=f"Module {module_name} not found")
+            
+        module = self.search_modules[module_name]
+        if not hasattr(module, 'SearchAPIProcessor'):
+            return ModuleResult(success=False, error=f"Module {module_name} does not have SearchAPIProcessor")
+            
+        processor = module.SearchAPIProcessor()
+        
+        for attempt in range(MAX_RETRIES):
+            try:
+                proxy = get_proxy(proxies)
+                result = await processor.search(email, settings, proxy)
+                if result:
+                    return ModuleResult(success=True, data=result)
+                await asyncio.sleep(RETRY_DELAY_SECONDS)
+            except Exception as e:
+                if attempt == MAX_RETRIES - 1:
+                    return ModuleResult(success=False, error=str(e))
+                await asyncio.sleep(RETRY_DELAY_SECONDS)
+                
+        return ModuleResult(success=False, error="Max retries reached")
+
+def process_email_for_lookup(email: str, proxies: List[str], settings: Dict[str, str]) -> Optional[Dict[str, Any]]:
+    search_processor = SearchProcessor()
     
-    for attempt in range(retries):
-        try:
-            response = requests.get(url, headers=headers, timeout=TASK_TIMEOUT)
-            response.raise_for_status()
-            if response.text == '{"error":"No data found."}':
-                return None
-            return response.json()
-        except Exception as e:
-            if attempt == retries - 1:
-                print(f"Error fetching details for {email}: {str(e)}")
-                return None
-            time.sleep(RETRY_DELAY_SECONDS)
+    enabled_modules = settings.get('enabled_search_modules', '').split(',')
+    if not enabled_modules or enabled_modules[0] == '':
+        enabled_modules = list(search_processor.search_modules.keys())
+    
+    results = []
+    for module_name in enabled_modules:
+        module_settings = {
+            key: settings.get(key)
+            for key in search_processor.required_settings.get(module_name, [])
+        }
+        
+        result = asyncio.run(search_processor.process_email(email, module_name, module_settings, proxies))
+        if result.success and result.data:
+            results.append(result.data)
+    
+    if results:
+        merged_result = results[0].copy()
+        for result in results[1:]:
+            for key, value in result.items():
+                if key not in merged_result or not merged_result[key]:
+                    merged_result[key] = value
+                elif isinstance(value, list):
+                    merged_result[key] = list(set(merged_result[key] + value))
+        
+        if 'phone_numbers' in merged_result:
+            merged_result['phone_numbers'] = [
+                convert_to_american_format(num) 
+                for num in merged_result['phone_numbers']
+            ]
+        
+        return merged_result
     return None
-
-def process_email_for_lookup(email, proxies, SearchAPI_key):
-    session = requests.Session()
-    details = get_details(session, proxies, SearchAPI_key, email)
-    
-    if not details:
-        return None
-    result = {
-        'email': details.get("email", ""),
-        'name': details.get("name", ""),
-        'phone_numbers': details.get("numbers", []),
-        'address': details.get("address", ""),
-        'dob': details.get("dob", ""),
-    }
-
-    formatted_numbers = [convert_to_american_format(num) for num in result['phone_numbers']]
-    result['phone_numbers'] = formatted_numbers
-    return result
 
 def convert_to_american_format(phone_number: str) -> str:
     digits = ''.join(filter(str.isdigit, phone_number))
@@ -78,36 +141,6 @@ def convert_to_american_format(phone_number: str) -> str:
     if len(digits) == 10:
         return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
     return phone_number
-
-def load_modules(folder_path):
-    modules = {}
-    for file_name in os.listdir(folder_path):
-        if file_name.endswith(".py"):
-            module_name = file_name[:-3]
-            module_path = f"{folder_path}.{module_name}"
-            try:
-                module = importlib.import_module(module_path)
-                modules[module_name] = module
-            except ImportError as e:
-                print(f"Failed to import module {module_name}: {e}")
-    return modules
-
-def get_required_settings(modules):
-    required_settings = {}
-    for module_name, module in modules.items():
-        if hasattr(module, 'ValidMailChecker'):
-            checker_class = getattr(module, 'ValidMailChecker')
-            if hasattr(checker_class, 'required_settings'):
-                settings = checker_class.required_settings()
-                required_settings[module_name] = settings
-        
-        if hasattr(module, 'EmailProcessor'):
-            processor_class = getattr(module, 'EmailProcessor')
-            if hasattr(processor_class, 'required_settings'):
-                settings = processor_class.required_settings()
-                required_settings[module_name] = settings
-    
-    return required_settings
 
 def find_email_supporting_classes(module):
     email_supported_classes = []
@@ -130,8 +163,6 @@ def find_email_supporting_module(email, modules, additional_modules):
 def index():
     emails = Email.query.all()
     return render_template('index.html', emails=emails)
-
-EMAIL_REGEX = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
 
 @app.route('/upload', methods=['POST'])
 def upload_emails():
@@ -162,9 +193,9 @@ def upload_emails():
 @app.route('/get_modules')
 def get_modules():
     try:
-        loaded_modules = load_modules('modules')
-        additional_modules = load_modules('additional_modules')
-        validmail_modules = load_modules('validmail_modules')
+        loaded_modules = ModuleLoader.load_modules('modules')
+        additional_modules = ModuleLoader.load_modules('additional_modules')
+        validmail_modules = ModuleLoader.load_modules('validmail_modules')
 
         module_info = []
         validmail_info = []
@@ -212,9 +243,10 @@ def perform_vm_check():
     selected_modules = request.json.get('selected_modules', [])
     validmail_results = []
 
-    loaded_modules = load_modules('validmail_modules')
+    loaded_modules = ModuleLoader.load_modules('validmail_modules')
     proxies = load_all_proxies()
-    max_concurrent_tasks = int(request.json['threads'])
+    settings = Settings.get_all_settings()
+    max_concurrent_tasks = int(settings.get('threads', 10))
 
     socketio.emit('task_status', {'status': 'Valid-Mail check started...'})
 
@@ -300,6 +332,9 @@ def process_email_for_validmail_check(app, email_record, loaded_modules, selecte
                         settings_for_module,
                         proxy
                     )
+                    if is_valid_mail is None:
+                        print(f"Not updating Records due to uncertain outcome")
+                        break
                     email = db.session.query(Email).filter_by(email=task_obj['email']).first()
                     if email:
                         email.update_validmail_results(module_name, is_valid_mail)
@@ -335,12 +370,10 @@ def perform_lookup():
     try:
         emails_to_lookup = request.json['selected_emails']
         lookup_results = []
-
+        
         proxies = load_all_proxies()
-        SearchAPI_key_key = Settings.get_setting('search_api_key')
-        if not SearchAPI_key_key:
-            return jsonify({'error': 'Search API key not found in settings'}), 400
-        max_concurrent_tasks = int(request.json['threads'])
+        settings = Settings.get_all_settings()
+        max_concurrent_tasks = int(settings.get('threads', 10))
 
         socketio.emit('task_status', {'status': 'Task started, processing...'})
 
@@ -349,27 +382,33 @@ def perform_lookup():
             for email in emails_to_lookup:
                 email_record = db.session.query(Email).filter_by(email=email).first()
                 if email_record:
-                    futures[executor.submit(process_email_for_lookup, email_record.email, proxies, SearchAPI_key_key)] = email_record
+                    futures[executor.submit(
+                        process_email_for_lookup,
+                        email_record.email,
+                        proxies,
+                        settings
+                    )] = email_record
 
             for future in concurrent.futures.as_completed(futures):
                 result = future.result()
                 if result:
                     lookup_results.append(result)
                     socketio.emit('email_result', result)
-                    email = db.session.query(Email).filter_by(email=result['email']).first()
-                    if email:
-                        email.update_info(
-                            name=result.get('name', ""),
-                            address=result.get('address', ""),
-                            dob=result.get('dob', "")
-                        )
-                        email.update_autodoxed(result.get('phone_numbers', []))
+                    
+                    email = futures[future]
+                    email.update_info(
+                        name=result.get('name', ""),
+                        address=result.get('address', ""),
+                        dob=result.get('dob', "")
+                    )
+                    email.update_autodoxed(result.get('phone_numbers', []))
 
         socketio.emit('task_status', {'status': 'Task completed, check results.'})
-
-        return redirect(url_for('index'))
+        return jsonify({'success': True, 'results': lookup_results})
+        
     except Exception as e:
-        print(e)
+        print(f"Error in perform_lookup: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/get_emails')
 def get_emails():
@@ -380,12 +419,11 @@ def get_emails():
 
     query = Email.query
 
-    if 'domain' in filters:
+    if filters.get('domain'):
         query = query.filter(Email.domain.ilike(f"%{filters['domain']}%"))
-    if 'status' in filters:
+    if filters.get('status'):
         query = query.filter(Email.status == filters['status'])
-
-    if 'module_results' in filters:
+    if filters.get('module_results'):
         for module_name, is_valid in filters['module_results'].items():
             print(f"Filtering by module: {module_name}, Valid: {is_valid}")
             query = query.filter(
@@ -413,13 +451,13 @@ def perform_recovery_check():
     emails_to_lookup = request.json['selected_emails']
     recovery_results = []
 
-    loaded_modules = load_modules('modules')
-    additional_modules = load_modules('additional_modules')
+    loaded_modules = ModuleLoader.load_modules('modules')
+    additional_modules = ModuleLoader.load_modules('additional_modules')
     proxies = load_all_proxies()
     
     all_modules = {**loaded_modules, **additional_modules}
     
-    required_settings = get_required_settings(all_modules)
+    required_settings = ModuleLoader.get_required_settings(all_modules)
     
     module_settings = {}
     for module_name, module in all_modules.items():
@@ -430,7 +468,8 @@ def perform_recovery_check():
             if Settings.get_setting(setting) is not None
         }
 
-    max_concurrent_tasks = int(request.json['threads'])
+    settings = Settings.get_all_settings()
+    max_concurrent_tasks = int(settings.get('threads', 10))
 
     socketio.emit('task_status', {'status': 'Recovery check started...'})
 
@@ -459,9 +498,62 @@ def perform_recovery_check():
     return redirect(url_for('index'))
 
 def process_email_for_recovery_check(app, email_record, loaded_modules, additional_modules, proxies, module_settings, max_retries=3):
+    def process_with_module(module_instance, task_obj, module_name, proxy_retry_count=0):
+        """Helper function to process email with a given module instance"""
+        while proxy_retry_count < max_retries:
+            try:
+                module_specific_settings = module_settings.get(module_name, {})
+                proxy = get_proxy(proxies)
+                
+                censored_number = module_instance.process_task(task_obj, module_specific_settings, proxy)
+                
+                if censored_number:
+                    update_email_record(task_obj['email'], censored_number)
+                    return True
+                return False
+                
+            except Exception as error:
+                print(f"An error occurred for {task_obj['email']} with module {module_instance.__class__.__name__}: {error}")
+                proxy_retry_count += 1
+                print(f"Retrying with a new proxy ({proxy_retry_count}/{max_retries})")
+        
+        print(f"Failed to process task for {task_obj['email']} with module {module_instance.__class__.__name__} after {max_retries} retries.")
+        return False
+
+    def update_email_record(email_address, censored_number):
+        print(f"Matched censored number for {email_address}: {censored_number}")
+        
+        email = db.session.query(Email).filter_by(email=email_address).first()
+        if not email:
+            print(f"Email {email_address} not found in the database.")
+            return
+            
+        phone_numbers = [censored_number]
+        email.update_recovery_check(phone_numbers)
+        print(f"Updated phone number for {email_address}: {phone_numbers}")
+        
+        email_result = {
+            'email': email_address,
+            'name': email.name or 'N/A',
+            'address': email.address or 'N/A',
+            'dob': email.dob or 'N/A',
+            'status': 'Recovery-Checked',
+            'phone_numbers': phone_numbers
+        }
+        socketio.emit('email_result', email_result)
+
+    def get_domain_instances(modules_dict):
+        instances = []
+        for module_name, module in modules_dict.items():
+            email_supported_classes = find_email_supporting_classes(module)
+            for class_obj in email_supported_classes:
+                instance = class_obj()
+                if instance.supports_domain(email_record.email.split('@')[-1]):
+                    instances.append((instance, module_name))
+        return instances
+
     with app.app_context():
         phone_numbers = email_record.phone_numbers
-
         if isinstance(phone_numbers, str):
             phone_numbers = [num.strip() for num in phone_numbers.split(';')]
         print("Processed phone numbers:", phone_numbers)
@@ -474,134 +566,33 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
             "dob": email_record.dob or "",
         }
 
-        tasks = []
-        domain_found_in_module = False
-        for module_name, module in loaded_modules.items():
-            email_supported_classes = find_email_supporting_classes(module)
-            for class_obj in email_supported_classes:
-                instance = class_obj()
-                if instance.supports_domain(email_record.email.split('@')[-1]):
-                    domain_found_in_module = True
-                    proxy_retry_count = 0
-                    while proxy_retry_count < max_retries:
-                        try:
-                            module_specific_settings = module_settings.get(module_name, {})
-                            proxy = get_proxy(proxies)
+        result_found = False
+        
+        primary_instances = get_domain_instances(loaded_modules)
+        for instance, module_name in primary_instances:
+            if process_with_module(instance, task_obj, module_name):
+                result_found = True
+                break
+        
+        if not result_found:
+            additional_instances = get_domain_instances(additional_modules)
+            print("Processing additional modules...")
+            for instance, module_name in additional_instances:
+                print(f"Processing {module_name} for {task_obj['email']}")
+                if process_with_module(instance, task_obj, module_name):
+                    result_found = True
+                    print(f"Result found with {module_name}")
+                    break
+            else:
+                print(f"All additional modules processed for {task_obj['email']}, no result found.")
 
-                            censored_number = instance.process_task(task_obj, module_specific_settings, proxy)
 
-                            if censored_number:
-                                print(f"Matched censored number for {task_obj['email']}: {censored_number}")
+        if result_found:
+            return [task_obj]
 
-                                email = db.session.query(Email).filter_by(email=task_obj['email']).first()
-                                if email:
-                                    phone_numbers = [censored_number]
-                                    email.update_recovery_check(phone_numbers)
-                                    print(f"Updated phone number for {task_obj['email']}: {phone_numbers}")
+        print(f"No results found for {task_obj['email']} after processing all modules.")
+        return [task_obj]
 
-                                    email_result = {
-                                        'email': task_obj['email'],
-                                        'name': email.name or 'N/A',
-                                        'address': email.address or 'N/A',
-                                        'dob': email.dob or 'N/A',
-                                        'status': 'Recovery-Checked',
-                                        'phone_numbers': phone_numbers
-                                    }
-
-                                    socketio.emit('email_result', email_result)
-
-                                else:
-                                    print(f"Email {task_obj['email']} not found in the database.")
-                                break
-                            else:
-                                for additional_module_name, additional_module in additional_modules.items():
-                                    email_supported_classes = find_email_supporting_classes(additional_module)
-                                    for class_obj in email_supported_classes:
-                                        instance = class_obj()
-                                        if instance.supports_domain(email_record.email.split('@')[-1]):
-                                            module_base_name = additional_module.__name__.split('.')[-1]
-                                            print(f"Processing task with {module_base_name}")
-                                        
-                                            module_specific_settings = module_settings.get(additional_module_name, {})
-                                            censored_number = instance.process_task(task_obj, module_specific_settings, proxy)
-
-                                            if censored_number:
-                                                print(f"Matched censored number for {task_obj['email']}: {censored_number}")
-                                                email = db.session.query(Email).filter_by(email=task_obj['email']).first()
-                                                if email:
-                                                    phone_numbers = [censored_number]
-                                                    email.update_recovery_check(phone_numbers)
-                                                    print(f"Updated phone number for {task_obj['email']}: {phone_numbers}")
-
-                                                    email_result = {
-                                                        'email': task_obj['email'],
-                                                        'name': email.name or 'N/A',
-                                                        'address': email.address or 'N/A',
-                                                        'dob': email.dob or 'N/A',
-                                                        'status': 'Recovery-Checked',
-                                                        'phone_numbers': phone_numbers
-                                                    }
-                                                    socketio.emit('email_result', email_result)
-                                            else:
-                                                break
-                                break
-                        except Exception as main_error:
-                            print(f"An error occurred for {task_obj['email']} with module {class_obj.__name__}: {main_error}")
-                            proxy_retry_count += 1
-                            print(f"Retrying with a new proxy ({proxy_retry_count}/{max_retries})")
-
-                    if proxy_retry_count == max_retries:
-                        print(f"Failed to process task for {task_obj['email']} with module {class_obj.__name__} after {max_retries} retries.")
-
-                    tasks.append(task_obj)
-
-        if not domain_found_in_module:
-            print(f"No modules found for domain, checking additional modules for {task_obj['email']}")
-            for additional_module_name, additional_module in additional_modules.items():
-                email_supported_classes = find_email_supporting_classes(additional_module)
-                for class_obj in email_supported_classes:
-                    instance = class_obj()
-                    if instance.supports_domain(email_record.email.split('@')[-1]):
-                        proxy_retry_count = 0
-                        while proxy_retry_count < max_retries:
-                            try:
-                                proxy = get_proxy(proxies)
-                                module_specific_settings = module_settings.get(additional_module_name, {})
-                                censored_number = instance.process_task(task_obj, module_specific_settings, proxy)
-
-                                if censored_number:
-                                    print(f"Matched censored number for {task_obj['email']}: {censored_number}")
-
-                                    email = db.session.query(Email).filter_by(email=task_obj['email']).first()
-                                    if email:
-                                        phone_numbers = [censored_number]
-                                        email.update_recovery_check(phone_numbers)
-                                        print(f"Updated phone number for {task_obj['email']}: {phone_numbers}")
-
-                                        email_result = {
-                                            'email': task_obj['email'],
-                                            'name': email.name or 'N/A',
-                                            'address': email.address or 'N/A',
-                                            'dob': email.dob or 'N/A',
-                                            'status': 'Recovery-Checked',
-                                            'phone_numbers': phone_numbers
-                                        }
-                                        socketio.emit('email_result', email_result)
-
-                                    else:
-                                        print(f"Email {task_obj['email']} not found in the database.")
-                                    break
-                                else:
-                                    break
-                            except Exception as main_error:
-                                print(f"An error occurred for {task_obj['email']} with additional module {class_obj.__name__}: {main_error}")
-                                proxy_retry_count += 1
-                                print(f"Retrying with a new proxy ({proxy_retry_count}/{max_retries})")
-
-                        if proxy_retry_count == max_retries:
-                            print(f"Failed to process task for {task_obj['email']} with additional module {class_obj.__name__} after {max_retries} retries.")
-
-        return tasks
 
 @app.route('/get_settings', methods=['GET'])
 def get_settings():
@@ -640,32 +631,34 @@ def handle_connect():
 def handle_disconnect():
     print("Client disconnected!")
 
-for directory in directories:
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
-
+        
         default_settings = {
             'threads': '10',
-            'search_api_key': ''
+            'enabled_search_modules': '',
         }
-
+        
+        for directory in DIRECTORIES:
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+                
+        modules = {}
+        for directory in ['validmail_modules', 'search_modules', 'additional_modules', 'modules']:
+            modules.update(ModuleLoader.load_modules(directory))
+            
+        required_settings = ModuleLoader.get_required_settings(modules)
+        
         for key, value in default_settings.items():
             if not Settings.query.filter_by(key=key).first():
                 db.session.add(Settings(key=key, value=value))
-        db.session.commit()
-        
-        modules = load_modules('validmail_modules')
-
-        required_settings = get_required_settings(modules)
-
-        for module_name, settings in required_settings.items():
-            for setting in settings:
+                
+        for module_settings in required_settings.values():
+            for setting in module_settings:
                 if not Settings.query.filter_by(key=setting).first():
                     db.session.add(Settings(key=setting, value=""))
+                    
         db.session.commit()
 
     socketio.run(app, debug=True)

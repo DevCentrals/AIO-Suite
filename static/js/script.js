@@ -137,6 +137,7 @@ function showValidMailCheckModal() {
         });
 }
 
+
 async function performValidMailCheck() {
     const selectedModules = Array.from(document.querySelectorAll('#validmail-module-selection-body input[type="checkbox"]:checked'))
         .map(checkbox => checkbox.value);
@@ -152,8 +153,6 @@ async function performValidMailCheck() {
         return;
     }
 
-    const threads = document.getElementById('threads').value;
-
     $('#validMailCheckModal').modal('hide');
 
     try {
@@ -163,7 +162,6 @@ async function performValidMailCheck() {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                threads: threads,
                 selected_emails: selectedEmails,
                 selected_modules: selectedModules
             })
@@ -419,7 +417,6 @@ function toggleSelectAll() {
 }
 
 async function performLookup() {
-    const threads = document.getElementById('threads').value;
     const executeAll = document.getElementById('execute-all').checked;
     showOverlay("Loading, please wait...");
     let selectedEmails = executeAll ? await getAllMatchingEmails() : getSelectedEmails();
@@ -437,7 +434,6 @@ async function performLookup() {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                threads,
                 selected_emails: selectedEmails
             })
         });
@@ -503,7 +499,6 @@ function populateStatusOptions(statuses) {
 }
 
 async function performRecoveryCheck() {
-    const threads = document.getElementById('threads').value;
     const executeAll = document.getElementById('execute-all').checked;
     let selectedEmails = executeAll ? await getAllMatchingEmails() : getSelectedEmails();
 
@@ -520,7 +515,6 @@ async function performRecoveryCheck() {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                threads,
                 selected_emails: selectedEmails
             })
         });
