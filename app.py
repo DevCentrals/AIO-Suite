@@ -571,6 +571,10 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
 
     with app.app_context():
         phone_numbers = email_record.phone_numbers
+        if not phone_numbers:
+            print(f"Skipping email {email_record.email} because it has no phone numbers.")
+            return []
+        
         if isinstance(phone_numbers, str):
             phone_numbers = [num.strip() for num in phone_numbers.split(';')]
         print("Processed phone numbers:", phone_numbers)
@@ -602,7 +606,6 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
                     break
             else:
                 print(f"All additional modules processed for {task_obj['email']}, no result found.")
-
 
         if result_found:
             return [task_obj]
