@@ -1,7 +1,7 @@
 import requests
 from typing import Optional, Dict, List
 
-class ModuleTemplate:
+class SearchAPIProcessor:
     """
     A template for creating modules that integrate with external APIs.
     """
