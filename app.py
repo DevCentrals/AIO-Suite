@@ -1,5 +1,4 @@
 import os
-import time
 import json
 import inspect
 import importlib
@@ -13,7 +12,6 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify, c
 from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO, emit
 
-import requests
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
@@ -68,7 +66,6 @@ class ModuleLoader:
                         settings = checker_class.required_settings()
                         required_settings[module_name] = settings
         return required_settings
-
 class SearchProcessor:
     def __init__(self):
         self.search_modules = ModuleLoader.load_modules('search_modules')
@@ -105,23 +102,6 @@ def convert_to_american_format(phone_number: str) -> str:
     if len(digits) == 10:
         return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
     return phone_number
-
-def find_email_supporting_classes(module):
-    email_supported_classes = []
-    for name, obj in inspect.getmembers(module):
-        if inspect.isclass(obj) and hasattr(obj, 'supports_email') and obj.supports_email:
-            email_supported_classes.append(obj)
-    return email_supported_classes
-
-def find_email_supporting_module(email, modules, additional_modules):
-    domain = email.split('@')[-1]
-    for module_name, module in modules.items():
-        email_supported_classes = find_email_supporting_classes(module)
-        for class_obj in email_supported_classes:
-            instance = class_obj()
-            if instance.supports_domain(domain):
-                return module_name, class_obj
-    return None, None
 
 @app.route('/')
 def index():
@@ -568,6 +548,13 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
                 if instance.supports_domain(email_record.email.split('@')[-1]):
                     instances.append((instance, module_name))
         return instances
+    
+    def find_email_supporting_classes(module):
+        email_supported_classes = []
+        for name, obj in inspect.getmembers(module):
+            if inspect.isclass(obj) and hasattr(obj, 'supports_email') and obj.supports_email:
+                email_supported_classes.append(obj)
+        return email_supported_classes
 
     with app.app_context():
         phone_numbers = email_record.phone_numbers
@@ -612,7 +599,6 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
 
         print(f"No results found for {task_obj['email']} after processing all modules.")
         return [task_obj]
-
 
 @app.route('/get_settings', methods=['GET'])
 def get_settings():
