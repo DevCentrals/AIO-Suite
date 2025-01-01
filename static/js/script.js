@@ -73,6 +73,7 @@ document.getElementById('close-panel-btn').addEventListener('click', function() 
 });
 
 document.addEventListener('DOMContentLoaded', function() {
+    const searchModuleList = document.getElementById('search-module-list');
     const recoveryModuleList = document.getElementById('recovery-module-list');
     const validMailModuleList = document.getElementById('vm-module-list');
 
@@ -82,9 +83,19 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(data => {
                 const recoveryModules = data.modules;
                 const validMailModules = data.validmail_modules;
+                const searchModules = data.search_modules
 
+                searchModuleList.innerHTML = '';
                 recoveryModuleList.innerHTML = '';
                 validMailModuleList.innerHTML = '';
+
+                searchModules.forEach(module => {
+                    const li = document.createElement('li');
+                    li.innerHTML = `<strong>${module.name}</strong> <small>by</small> <em>${module.developer}</em>`;
+                    li.style.padding = '8px 0';
+                    li.style.borderBottom = '1px solid #ddd';
+                    searchModuleList.appendChild(li);
+                });
 
                 recoveryModules.forEach(module => {
                     const li = document.createElement('li');
@@ -137,6 +148,32 @@ function showValidMailCheckModal() {
         });
 }
 
+function showSearchModal() {
+    fetch('/get_modules')
+        .then(response => response.json())
+        .then(data => {
+            const searchModules = data.search_modules;
+            const modalBody = document.getElementById('search-module-selection-body');
+            modalBody.innerHTML = '';
+
+            searchModules.forEach(module => {
+                const moduleItem = document.createElement('div');
+                moduleItem.classList.add('form-check');
+                moduleItem.innerHTML = `  
+                    <input class="form-check-input" type="checkbox" value="${module.module_name}" id="module-${module.module_name}">
+                    <label class="form-check-label" for="module-${module.module_name}">
+                        <strong>${module.name}</strong> by <em>${module.developer}</em>
+                    </label>
+                `;
+                modalBody.appendChild(moduleItem);
+            });
+
+            $('#searchkModal').modal('show');
+        })
+        .catch(error => {
+            console.error('Error fetching module list:', error);
+        });
+}
 
 async function performValidMailCheck() {
     const selectedModules = Array.from(document.querySelectorAll('#validmail-module-selection-body input[type="checkbox"]:checked'))
@@ -181,9 +218,9 @@ async function performValidMailCheck() {
 
 
 document.getElementById('perform-validmailcheck-btn').addEventListener('click', showValidMailCheckModal);
-
+document.getElementById('perform-search-btn').addEventListener('click', showSearchModal);
 document.getElementById('validmail-modal-submit-btn').addEventListener('click', performValidMailCheck);
-
+document.getElementById('search-modal-submit-btn').addEventListener('click', performLookup);
 
 async function fetchRecords(page = 1, filters = currentFilters) {
     try {
@@ -418,14 +455,24 @@ function toggleSelectAll() {
 
 async function performLookup() {
     const executeAll = document.getElementById('execute-all').checked;
+    const selectedModules = Array.from(document.querySelectorAll('#search-module-selection-body input[type="checkbox"]:checked'))
+        .map(checkbox => checkbox.value);
+
+    if (selectedModules.length === 0) {
+        alert('Please select at least one module to run.');
+        return;
+    }
+
     showOverlay("Loading, please wait...");
-    let selectedEmails = executeAll ? await getAllMatchingEmails() : getSelectedEmails();
+    const selectedEmails = executeAll ? await getAllMatchingEmails() : getSelectedEmails();
 
     if (selectedEmails.length === 0) {
         closeOverlay();
-        alert('Please select at least one email to perform lookup.');
+        alert('Please select at least one email to perform the check.');
         return;
     }
+
+    $('#searchModal').modal('hide');
 
     try {
         const response = await fetch('/perform_lookup', {
@@ -434,17 +481,25 @@ async function performLookup() {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                selected_emails: selectedEmails
+                selected_emails: selectedEmails,
+                selected_modules: selectedModules
             })
         });
-        const data = await response.json();
-        updateTable(data);
+
+        const result = await response.json();
+        if (response.ok) {
+            alert('Search completed.');
+        } else {
+            alert('An error occurred during the search.');
+        }
     } catch (error) {
-        console.error('Error:', error);
+        console.error('Error during Search:', error);
+        alert('An error occurred. Please try again.');
     } finally {
         closeOverlay();
     }
 }
+
 
 function getSelectedEmails() {
     return Array.from(document.querySelectorAll('input[name="selected_emails"]:checked'))

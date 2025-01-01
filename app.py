@@ -98,42 +98,6 @@ class SearchProcessor:
                 
         return ModuleResult(success=False, error="Max retries reached")
 
-def process_email_for_lookup(email: str, proxies: List[str], settings: Dict[str, str]) -> Optional[Dict[str, Any]]:
-    search_processor = SearchProcessor()
-    
-    enabled_modules = settings.get('enabled_search_modules', '').split(',')
-    if not enabled_modules or enabled_modules[0] == '':
-        enabled_modules = list(search_processor.search_modules.keys())
-    
-    results = []
-    for module_name in enabled_modules:
-        module_settings = {
-            key: settings.get(key)
-            for key in search_processor.required_settings.get(module_name, [])
-        }
-        
-        result = asyncio.run(search_processor.process_email(email, module_name, module_settings, proxies))
-        if result.success and result.data:
-            results.append(result.data)
-    
-    if results:
-        merged_result = results[0].copy()
-        for result in results[1:]:
-            for key, value in result.items():
-                if key not in merged_result or not merged_result[key]:
-                    merged_result[key] = value
-                elif isinstance(value, list):
-                    merged_result[key] = list(set(merged_result[key] + value))
-        
-        if 'phone_numbers' in merged_result:
-            merged_result['phone_numbers'] = [
-                convert_to_american_format(num) 
-                for num in merged_result['phone_numbers']
-            ]
-        
-        return merged_result
-    return None
-
 def convert_to_american_format(phone_number: str) -> str:
     digits = ''.join(filter(str.isdigit, phone_number))
     if len(digits) == 11 and digits.startswith('1'):
@@ -171,22 +135,21 @@ def upload_emails():
         if emails:
             email_lines = emails.read().decode('utf-8').splitlines()
             valid_emails = []
-            
+            existing_emails = {email.email for email in Email.query.all()}
+        
             for email in email_lines:
                 email = email.strip()
-                if re.match(EMAIL_REGEX, email):
+                if re.match(EMAIL_REGEX, email) and email not in existing_emails:
                     domain = email.split('@')[-1]
-                    
-                    existing_email = Email.query.filter_by(email=email).first()
-                    if not existing_email:
-                        valid_emails.append(Email(email=email, domain=domain))
-            
+                    valid_emails.append(Email(email=email, domain=domain))
+                    existing_emails.add(email)
             if valid_emails:
                 try:
                     db.session.bulk_save_objects(valid_emails)
                     db.session.commit()
-                except IntegrityError:
+                except IntegrityError as e:
                     db.session.rollback()
+                    print(f"Database Error: {e}")
         
         return redirect(url_for('index'))
     
@@ -196,7 +159,9 @@ def get_modules():
         loaded_modules = ModuleLoader.load_modules('modules')
         additional_modules = ModuleLoader.load_modules('additional_modules')
         validmail_modules = ModuleLoader.load_modules('validmail_modules')
-
+        search_modules = ModuleLoader.load_modules('search_modules')
+        
+        search_modules_info = []
         module_info = []
         validmail_info = []
 
@@ -215,6 +180,22 @@ def get_modules():
         else:
             print("Error: Expected dictionaries for modules, but got something else.")
             return jsonify({'modules': [], 'validmail_modules': []})
+        
+        if isinstance(search_modules, dict):
+            all_modules = {**search_modules}
+            for module_name, module in all_modules.items():
+                if hasattr(module, 'SearchAPIProcessor'):
+                    processor_class = getattr(module, 'SearchAPIProcessor')
+                    processor_instance = processor_class()
+                    if hasattr(processor_instance, 'name') and hasattr(processor_instance, 'developer'):
+                        search_modules_info.append({
+                            'name': processor_instance.name,
+                            'developer': processor_instance.developer,
+                            'module_name': module_name
+                        })
+        else:
+            print("Error: Expected dictionaries for search_modules, but got something else.")
+            return jsonify({'search_modules': []})
 
         if isinstance(validmail_modules, dict):
             for module_name, module in validmail_modules.items():
@@ -230,7 +211,8 @@ def get_modules():
 
         return jsonify({
             'modules': module_info,
-            'validmail_modules': validmail_info
+            'validmail_modules': validmail_info,
+            'search_modules': search_modules_info
         })
 
     except Exception as e:
@@ -369,6 +351,8 @@ def process_email_for_validmail_check(app, email_record, loaded_modules, selecte
 def perform_lookup():
     try:
         emails_to_lookup = request.json['selected_emails']
+        selected_modules = request.json.get('selected_modules', [])
+        
         lookup_results = []
         
         proxies = load_all_proxies()
@@ -386,7 +370,8 @@ def perform_lookup():
                         process_email_for_lookup,
                         email_record.email,
                         proxies,
-                        settings
+                        settings,
+                        selected_modules
                     )] = email_record
 
             for future in concurrent.futures.as_completed(futures):
@@ -409,6 +394,38 @@ def perform_lookup():
     except Exception as e:
         print(f"Error in perform_lookup: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+def process_email_for_lookup(email: str, proxies: List[str], settings: Dict[str, str], selected_modules) -> Optional[Dict[str, Any]]:
+    search_processor = SearchProcessor()
+        
+    results = []
+    for module_name in selected_modules:
+        module_settings = {
+            key: settings.get(key)
+            for key in search_processor.required_settings.get(module_name, [])
+        }
+        
+        result = asyncio.run(search_processor.process_email(email, module_name, module_settings, proxies))
+        if result.success and result.data:
+            results.append(result.data)
+    
+    if results:
+        merged_result = results[0].copy()
+        for result in results[1:]:
+            for key, value in result.items():
+                if key not in merged_result or not merged_result[key]:
+                    merged_result[key] = value
+                elif isinstance(value, list):
+                    merged_result[key] = list(set(merged_result[key] + value))
+        
+        if 'phone_numbers' in merged_result:
+            merged_result['phone_numbers'] = [
+                convert_to_american_format(num) 
+                for num in merged_result['phone_numbers']
+            ]
+        
+        return merged_result
+    return None
 
 @app.route('/get_emails')
 def get_emails():
@@ -637,7 +654,6 @@ if __name__ == "__main__":
         
         default_settings = {
             'threads': '10',
-            'enabled_search_modules': '',
         }
         
         for directory in DIRECTORIES:
