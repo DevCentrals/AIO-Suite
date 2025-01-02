@@ -85,9 +85,12 @@ class SearchProcessor:
             try:
                 proxy = get_proxy(proxies)
                 result = await processor.search(email, settings, proxy)
-                if result:
+                
+                if result is not None:
                     return ModuleResult(success=True, data=result)
-                await asyncio.sleep(RETRY_DELAY_SECONDS)
+                
+                return ModuleResult(success=False, error="No results found")
+            
             except Exception as e:
                 if attempt == MAX_RETRIES - 1:
                     return ModuleResult(success=False, error=str(e))
