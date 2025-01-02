@@ -99,7 +99,6 @@ class SearchAPIProcessor:
         return True
 
     def get_captcha_solution(self):
-        print(f"Solving ReCaptcha")
         while True:
             try:
                 payload = {
@@ -124,8 +123,7 @@ class SearchAPIProcessor:
 
                     if "ERROR_" in result_response.text:
                         print(f"Error from Capsolver: {result_response.text}")
-                        time.sleep(1)
-                        break
+                        raise Exception
 
                     if result_response.json().get("status") == "ready":
                         return result_response.json().get("solution", {}).get("gRecaptchaResponse")

@@ -2,7 +2,7 @@ import requests
 from typing import Optional, Dict, List
 
 class SearchAPIProcessor:
-    name = "Search-API"
+    name = "Search-API - @ADSearchEngine_bot"
     developer = "@CPUCycle"
 
     @staticmethod
@@ -10,6 +10,7 @@ class SearchAPIProcessor:
         return ['search_api_key']
 
     async def search(self, email: str, settings: Dict[str, str], proxy: str) -> Optional[Dict]:
+        print(f"Processing {email} with SearchAPI")
         api_key = settings.get('search_api_key')
         if not api_key:
             raise ValueError("Search API key not found in settings")
@@ -27,7 +28,7 @@ class SearchAPIProcessor:
                 headers=headers, 
                 timeout=30
             )
-            print(response.text)
+
             response.raise_for_status()
             
             if response.text == '{"error":"No data found."}':
