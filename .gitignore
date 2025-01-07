@@ -15,7 +15,7 @@ __pycache__/
 /additional_modules/
 /validmail_modules/
 /instance/
-
+/Exclude/*
 #and the proxies
 proxies.txt
 

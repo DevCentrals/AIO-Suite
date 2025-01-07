@@ -446,6 +446,61 @@ def get_emails():
         'statuses': status_list
     })
 
+@app.route('/delete_records', methods=['POST'])
+def delete_records():
+    try:
+        data = request.get_json()
+        delete_type = data.get('delete_type')
+        
+        if delete_type == 'selected':
+            # Delete specific emails
+            emails = data.get('emails', [])
+            if not emails:
+                return jsonify({'success': False, 'message': 'No emails provided'}), 400
+                
+            result = Email.query.filter(Email.email.in_(emails)).delete(synchronize_session='fetch')
+            
+        elif delete_type == 'filtered':
+            # Delete based on filters
+            filters = data.get('filters', {})
+            query = Email.query
+            
+            if filters.get('domain'):
+                query = query.filter(Email.domain.ilike(f"%{filters['domain']}%"))
+            if filters.get('status'):
+                query = query.filter(Email.status == filters['status'])
+            if filters.get('module_results'):
+                for module_name, is_valid in filters['module_results'].items():
+                    query = query.filter(
+                        func.json_extract(Email.validmail_results, f'$.{module_name}').cast(db.Boolean) == (True if is_valid else False)
+                    )
+                    
+            result = query.delete(synchronize_session='fetch')
+            
+        elif delete_type == 'all':
+            # Delete all records
+            result = Email.query.delete(synchronize_session='fetch')
+            
+        else:
+            return jsonify({'success': False, 'message': 'Invalid delete type'}), 400
+        
+        # Commit the changes
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'deleted_count': result,
+            'message': f'Successfully deleted {result} record(s)'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Error deleting records: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error deleting records: {str(e)}'
+        }), 500
+
 @app.route('/perform_recovery_check', methods=['POST'])
 def perform_recovery_check():
     emails_to_lookup = request.json['selected_emails']

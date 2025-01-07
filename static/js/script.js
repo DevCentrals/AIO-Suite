@@ -524,6 +524,105 @@ function applyFilters() {
     fetchRecords(currentPage, currentFilters);
 }
 
+async function deleteSelectedRecords() {
+    const selectedEmails = getSelectedEmails();
+    
+    if (selectedEmails.length === 0) {
+        alert('Please select at least one record to delete.');
+        return;
+    }
+
+    if (!confirm(`Are you sure you want to delete ${selectedEmails.length} selected record(s)?`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/delete_records', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                emails: selectedEmails,
+                delete_type: 'selected'
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            alert(`Successfully deleted ${result.deleted_count} record(s)`);
+            fetchRecords(currentPage, currentFilters); // Refresh the table
+        } else {
+            alert('Error deleting records: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error deleting records:', error);
+        alert('An error occurred while deleting records.');
+    }
+
+    $('#deleteModal').modal('hide');
+}
+
+async function deleteFilteredRecords() {
+    if (!confirm('Are you sure you want to delete all filtered records?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/delete_records', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                filters: currentFilters,
+                delete_type: 'filtered'
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            alert(`Successfully deleted ${result.deleted_count} record(s)`);
+            fetchRecords(1, currentFilters); // Reset to first page and refresh
+        } else {
+            alert('Error deleting records: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error deleting filtered records:', error);
+        alert('An error occurred while deleting records.');
+    }
+
+    $('#deleteModal').modal('hide');
+}
+
+async function clearAllRecords() {
+    try {
+        const response = await fetch('/delete_records', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                delete_type: 'all'
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            alert('Successfully cleared all records');
+            fetchRecords(1); // Reset to first page with no filters
+        } else {
+            alert('Error clearing records: ' + result.message);
+        }
+    } catch (error) {
+        console.error('Error clearing all records:', error);
+        alert('An error occurred while clearing records.');
+    }
+
+    $('#confirmClearAllModal').modal('hide');
+    $('#deleteModal').modal('hide');
+}
+
 async function populateModuleFilter() {
     try {
         const response = await fetch('/get_modules');
