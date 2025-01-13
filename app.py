@@ -27,7 +27,7 @@ socketio = SocketIO(app, async_mode='threading')
 
 db.init_app(app)
 
-MAX_RETRIES = 1
+MAX_RETRIES = 3
 TASK_TIMEOUT = 30
 RETRY_DELAY_SECONDS = 2
 DIRECTORIES = ['modules', 'additional_modules', 'validmail_modules', 'search_modules', 'instance']
