@@ -23,6 +23,7 @@ const openPanelBtn = document.getElementById('open-panel-btn');
 const modulePanel = document.getElementById('module-panel');
 const closePanelBtn = document.getElementById('close-panel-btn');
 const moduleList = document.getElementById('module-list');
+document.getElementById('export-csv-btn').onclick = showExportFormatModal;
 
 dropArea.addEventListener("dragover", (event) => {
     event.preventDefault();
@@ -285,60 +286,224 @@ function updateProgress(message) {
     progressMessageElem.textContent = message;
 }
 
-function exportToCSV() {
-    getFilteredRecords().then(records => {
-        if (records.length === 0) {
-            alert('No records to export!');
-            return;
-        }
+function showExportFormatModal() {
+    const modalHTML = `
+    <div class="modal fade" id="exportFormatModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Export Settings</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Select Format</label>
+                        <select class="form-select" id="exportFormat">
+                            <option value="csv">CSV (.csv)</option>
+                            <option value="tsv">Tab Separated (.tsv)</option>
+                            <option value="txt">Text File (.txt)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Select and Order Columns</label>
+                        <p class="text-muted small">Drag and drop to reorder columns. Uncheck to exclude.</p>
+                        <div id="columnSelection" class="d-flex flex-column gap-2">
+                            <div class="list-group" id="sortableColumns">
+                                <div class="list-group-item d-flex align-items-center" draggable="true" data-column="email">
+                                    <span class="drag-handle me-2">☰</span>
+                                    <input class="form-check-input me-2" type="checkbox" value="email" id="col-email" checked>
+                                    <label class="form-check-label flex-grow-1" for="col-email">Email</label>
+                                </div>
+                                <div class="list-group-item d-flex align-items-center" draggable="true" data-column="name">
+                                    <span class="drag-handle me-2">☰</span>
+                                    <input class="form-check-input me-2" type="checkbox" value="name" id="col-name" checked>
+                                    <label class="form-check-label flex-grow-1" for="col-name">Full Name</label>
+                                </div>
+                                <div class="list-group-item d-flex align-items-center" draggable="true" data-column="phone_numbers">
+                                    <span class="drag-handle me-2">☰</span>
+                                    <input class="form-check-input me-2" type="checkbox" value="phone_numbers" id="col-phone" checked>
+                                    <label class="form-check-label flex-grow-1" for="col-phone">Phone Numbers</label>
+                                </div>
+                                <div class="list-group-item d-flex align-items-center" draggable="true" data-column="address">
+                                    <span class="drag-handle me-2">☰</span>
+                                    <input class="form-check-input me-2" type="checkbox" value="address" id="col-address" checked>
+                                    <label class="form-check-label flex-grow-1" for="col-address">Address</label>
+                                </div>
+                                <div class="list-group-item d-flex align-items-center" draggable="true" data-column="dob">
+                                    <span class="drag-handle me-2">☰</span>
+                                    <input class="form-check-input me-2" type="checkbox" value="dob" id="col-dob" checked>
+                                    <label class="form-check-label flex-grow-1" for="col-dob">Date of Birth</label>
+                                </div>
+                                <div class="list-group-item d-flex align-items-center" draggable="true" data-column="status">
+                                    <span class="drag-handle me-2">☰</span>
+                                    <input class="form-check-input me-2" type="checkbox" value="status" id="col-status" checked>
+                                    <label class="form-check-label flex-grow-1" for="col-status">Status</label>
+                                </div>
+                                <div class="list-group-item d-flex align-items-center" draggable="true" data-column="validmail_results">
+                                    <span class="drag-handle me-2">☰</span>
+                                    <input class="form-check-input me-2" type="checkbox" value="validmail_results" id="col-validmail" checked>
+                                    <label class="form-check-label flex-grow-1" for="col-validmail">ValidMail Results</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="executeExport()">Export</button>
+                </div>
+            </div>
+        </div>
+    </div>`;
 
-        const csvRows = [];
-        const headers = ['Email', 'Status', 'Name', 'Phone Numbers', 'Address', 'DOB'];
+    if (!document.getElementById('exportFormatModal')) {
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+        initializeDragAndDrop();
+    }
 
-        const validMailModules = new Set();
-        records.forEach(record => {
-            if (record.validmail_results) {
-                Object.keys(record.validmail_results).forEach(module => validMailModules.add(module));
-            }
-        });
-
-        const validMailHeaders = Array.from(validMailModules);
-        csvRows.push([...headers, ...validMailHeaders].join('\t'));
-
-        records.forEach(record => {
-            const phoneNumbers = Array.isArray(record.phone_numbers) ? record.phone_numbers.join(', ') : record.phone_numbers || 'N/A';
-            const row = [
-                record.email,
-                record.status || 'N/A',
-                record.name || 'N/A',
-                phoneNumbers,
-                record.address || 'N/A',
-                record.dob || 'N/A'
-            ];
-
-            validMailHeaders.forEach(module => {
-                row.push(record.validmail_results && module in record.validmail_results ?
-                    (record.validmail_results[module] ? 'Valid' : 'Invalid') :
-                    'N/A');
-            });
-
-            csvRows.push(row.join('\t'));
-        });
-
-        const blob = new Blob([csvRows.join('\n')], {
-            type: 'text/csv'
-        });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'filtered_emails_with_validmail_results.csv';
-        a.click();
-        URL.revokeObjectURL(url);
-    }).catch(error => {
-        console.error('Error during export:', error);
-    });
+    const modal = new bootstrap.Modal(document.getElementById('exportFormatModal'));
+    modal.show();
 }
 
+function initializeDragAndDrop() {
+    const sortableList = document.getElementById('sortableColumns');
+    let draggedItem = null;
+
+    const style = document.createElement('style');
+    style.textContent = `
+        .drag-handle { cursor: move; user-select: none; }
+        .list-group-item { cursor: move; background: white; }
+        .list-group-item.dragging { opacity: 0.5; }
+        .list-group-item.drag-over { border-top: 2px solid #0d6efd; }
+    `;
+    document.head.appendChild(style);
+
+    const items = sortableList.getElementsByClassName('list-group-item');
+    Array.from(items).forEach(item => {
+        item.addEventListener('dragstart', handleDragStart);
+        item.addEventListener('dragend', handleDragEnd);
+        item.addEventListener('dragover', handleDragOver);
+        item.addEventListener('drop', handleDrop);
+    });
+
+    function handleDragStart(e) {
+        draggedItem = this;
+        this.classList.add('dragging');
+    }
+
+    function handleDragEnd(e) {
+        draggedItem.classList.remove('dragging');
+        Array.from(items).forEach(item => {
+            item.classList.remove('drag-over');
+        });
+    }
+
+    function handleDragOver(e) {
+        e.preventDefault();
+        this.classList.add('drag-over');
+    }
+
+    function handleDrop(e) {
+        e.preventDefault();
+        if (this !== draggedItem) {
+            const allItems = [...items];
+            const draggedIndex = allItems.indexOf(draggedItem);
+            const droppedIndex = allItems.indexOf(this);
+
+            if (draggedIndex > droppedIndex) {
+                this.parentNode.insertBefore(draggedItem, this);
+            } else {
+                this.parentNode.insertBefore(draggedItem, this.nextSibling);
+            }
+        }
+        this.classList.remove('drag-over');
+    }
+}
+
+async function executeExport() {
+    const format = document.getElementById('exportFormat').value;
+    const columnElements = Array.from(document.getElementById('sortableColumns').children);
+    
+    const selectedColumns = columnElements
+        .filter(el => el.querySelector('input[type="checkbox"]').checked)
+        .map(el => el.dataset.column);
+
+    if (selectedColumns.length === 0) {
+        alert('Please select at least one column to export!');
+        return;
+    }
+
+    const records = await getFilteredRecords();
+    if (records.length === 0) {
+        alert('No records to export!');
+        return;
+    }
+
+    const separator = format === 'tsv' ? '\t' : format === 'csv' ? ',' : ' | ';
+    
+    const rows = [];
+    const headers = selectedColumns.map(col => {
+        switch (col) {
+            case 'name': return 'Full Name';
+            case 'phone_numbers': return 'Phone Numbers';
+            case 'validmail_results': return 'ValidMail Results';
+            default: return col.charAt(0).toUpperCase() + col.slice(1);
+        }
+    });
+    rows.push(headers.join(separator));
+
+    records.forEach(record => {
+        const row = selectedColumns.map(col => {
+            let value = record[col];
+            
+            if (col === 'phone_numbers') {
+                value = Array.isArray(value) ? value.join('; ') : value || 'N/A';
+            } else if (col === 'validmail_results') {
+                value = value ? Object.entries(value)
+                    .map(([module, result]) => `${module}:${result ? 'Valid' : 'Invalid'}`)
+                    .join('; ') : 'N/A';
+            } else {
+                value = value || 'N/A';
+            }
+
+            if (format === 'csv' && value.includes(',')) {
+                value = `"${value.replace(/"/g, '""')}"`;
+            }
+
+            return value;
+        });
+        rows.push(row.join(separator));
+    });
+
+    const fileContent = rows.join('\n');
+    const fileType = format === 'csv' ? 'text/csv' : 'text/plain';
+
+    try {
+        const fileHandle = await window.showSaveFilePicker({
+            suggestedName: `exported_records.${format}`,
+            types: [
+                {
+                    description: `${format.toUpperCase()} File`,
+                    accept: { [fileType]: [`.${format}`] }
+                }
+            ]
+        });
+
+        const writableStream = await fileHandle.createWritable();
+        await writableStream.write(fileContent);
+        await writableStream.close();
+
+        alert('File saved successfully!');
+    } catch (error) {
+        if (error.name !== 'AbortError') {
+            console.error('Error saving file:', error);
+            alert('Failed to save the file. Please try again.');
+        }
+    }
+
+    const modal = bootstrap.Modal.getInstance(document.getElementById('exportFormatModal'));
+    modal.hide();
+}
 
 async function getFilteredRecords() {
     const filters = {
