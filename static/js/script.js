@@ -184,6 +184,7 @@ function showSearchModal() {
 }
 
 async function performValidMailCheck() {
+    const executeAll = document.getElementById('execute-all').checked;
     const selectedModules = Array.from(document.querySelectorAll('#validmail-module-selection-body input[type="checkbox"]:checked'))
         .map(checkbox => checkbox.value);
 
@@ -192,13 +193,12 @@ async function performValidMailCheck() {
         return;
     }
 
-    const selectedEmails = getSelectedEmails();
+    const selectedEmails = executeAll ? await getAllMatchingEmails() : getSelectedEmails();
     if (selectedEmails.length === 0) {
         alert('Please select at least one email to perform the check.');
         return;
     }
 
-    // Initialize stats before starting the operation
     initializeStats(selectedEmails.length);
     
     $('#validMailCheckModal').modal('hide');
@@ -640,6 +640,7 @@ async function performLookup() {
 
     showOverlay("Loading, please wait...");
     const selectedEmails = executeAll ? await getAllMatchingEmails() : getSelectedEmails();
+    console.log(selectedEmails);
     initializeStats(selectedEmails.length);
 
     if (selectedEmails.length === 0) {
