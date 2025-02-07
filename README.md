@@ -12,6 +12,7 @@ This project is a web-based application designed to upload, process, and validat
 - **Concurrency**: Perform concurrent email lookups and checks using configurable threads.
 - **Settings Management**: Manage settings like API keys and concurrency options.
 - **Real-time Updates**: Use SocketIO for real-time status updates during long-running tasks.
+- **Login System**: Has a login system with toggle-able registration, open app.py to toggle registration ( app.config['ALLOW_REGISTRATION'] = False )
 
 ## Prerequisites
 
