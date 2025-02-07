@@ -3,7 +3,6 @@ let currentPage = 1;
 let totalRecords = 0;
 let currentFilters = {};
 
-// Add these variables at the top of the file
 let statsStartTime = null;
 let statsInterval = null;
 let totalTasks = 0;

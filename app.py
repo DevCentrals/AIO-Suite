@@ -451,14 +451,24 @@ def process_email_for_lookup(app, email: str, proxies: List[str], settings: Dict
                 ]
         
         email_record = db.session.query(Email).filter_by(email=email).first()
+        
+        validmail_results = email_record.validmail_results if email_record else {}
+        if isinstance(validmail_results, str):
+            try:
+                validmail_results = json.loads(validmail_results)
+            except json.JSONDecodeError:
+                validmail_results = {}
+        
         result_to_emit = {
             'email': email,
             'name': merged_result.get('name', email_record.name if email_record else 'N/A'),
             'address': merged_result.get('address', email_record.address if email_record else 'N/A'),
             'dob': merged_result.get('dob', email_record.dob if email_record else 'N/A'),
             'phone_numbers': merged_result.get('phone_numbers', []),
+            'validmail_results': validmail_results,
             'status': 'Searched',
-            'success': bool(results)
+            'success': bool(results),
+            'processed_modules': selected_modules
         }
         
         socketio.emit('email_result', result_to_emit)
@@ -624,7 +634,7 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
                 censored_number = module_instance.process_task(task_obj, module_specific_settings, proxy)
                 
                 if censored_number:
-                    update_email_record(task_obj['email'], censored_number)
+                    update_email_record(task_obj['email'], censored_number, module_name)
                     return True
                 return False
                 
@@ -636,7 +646,7 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
         print(f"Failed to process task for {task_obj['email']} with module {module_instance.__class__.__name__} after {max_retries} retries.")
         return False
 
-    def update_email_record(email_address, censored_number):
+    def update_email_record(email_address, censored_number, module_name):
         print(f"Matched censored number for {email_address}: {censored_number}")
         
         email = db.session.query(Email).filter_by(email=email_address).first()
@@ -648,13 +658,22 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
         email.update_recovery_check(phone_numbers)
         print(f"Updated phone number for {email_address}: {phone_numbers}")
         
+        validmail_results = email.validmail_results or {}
+        if isinstance(validmail_results, str):
+            try:
+                validmail_results = json.loads(validmail_results)
+            except json.JSONDecodeError:
+                validmail_results = {}
+        
         email_result = {
             'email': email_address,
             'name': email.name or 'N/A',
             'address': email.address or 'N/A',
             'dob': email.dob or 'N/A',
             'status': 'Recovery-Checked',
-            'phone_numbers': phone_numbers
+            'phone_numbers': phone_numbers,
+            'validmail_results': validmail_results,
+            'processed_modules': [module_name]
         }
         socketio.emit('email_result', {
             **email_result,
@@ -681,6 +700,13 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
     with app.app_context():
         phone_numbers = email_record.phone_numbers
         if not phone_numbers:
+            validmail_results = email_record.validmail_results or {}
+            if isinstance(validmail_results, str):
+                try:
+                    validmail_results = json.loads(validmail_results)
+                except json.JSONDecodeError:
+                    validmail_results = {}
+                    
             email_result = {
                 'email': email_record.email,
                 'name': email_record.name or 'N/A',
@@ -688,6 +714,8 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
                 'dob': email_record.dob or 'N/A',
                 'status': 'Skipped-No-Numbers',
                 'phone_numbers': [],
+                'validmail_results': validmail_results,
+                'processed_modules': [],
                 'success': False
             }
             socketio.emit('email_result', email_result)
@@ -706,9 +734,11 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
         }
 
         result_found = False
+        processed_modules = []
         
         primary_instances = get_domain_instances(loaded_modules)
         for instance, module_name in primary_instances:
+            processed_modules.append(module_name)
             if process_with_module(instance, task_obj, module_name):
                 result_found = True
                 break
@@ -718,12 +748,20 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
             print("Processing additional modules...")
             for instance, module_name in additional_instances:
                 print(f"Processing {module_name} for {task_obj['email']}")
+                processed_modules.append(module_name)
                 if process_with_module(instance, task_obj, module_name):
                     result_found = True
                     print(f"Result found with {module_name}")
                     break
             else:
                 print(f"All additional modules processed for {task_obj['email']}, no result found.")
+
+        validmail_results = email_record.validmail_results or {}
+        if isinstance(validmail_results, str):
+            try:
+                validmail_results = json.loads(validmail_results)
+            except json.JSONDecodeError:
+                validmail_results = {}
 
         email_result = {
             'email': email_record.email,
@@ -732,6 +770,8 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
             'dob': email_record.dob or 'N/A',
             'status': 'Recovery-Checked',
             'phone_numbers': phone_numbers,
+            'validmail_results': validmail_results,
+            'processed_modules': processed_modules,
             'success': result_found
         }
         socketio.emit('email_result', email_result)
