@@ -40,6 +40,8 @@
         <li><a href="#" id="export-csv-btn"><i class="fas fa-file-export"></i> Export</a></li>
         <li><a href="#" data-bs-toggle="modal" data-bs-target="#deleteModal"><i class="fas fa-trash"></i> Delete Records</a></li>
         <li><a href="#" data-bs-toggle="modal" data-bs-target="#settingsModal" onclick="loadSettings()"><i class="fas fa-cogs"></i> Settings</a></li>
+        <li><a href="{{ url_for('auth.logout') }}"><i class="fas fa-sign-out-alt"></i> Logout</a></li>
+
       </ul>
     </div>
 

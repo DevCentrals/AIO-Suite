@@ -11,21 +11,37 @@ import asyncio
 from flask import Flask, render_template, request, redirect, url_for, jsonify, current_app
 from flask_sqlalchemy import SQLAlchemy
 from flask_socketio import SocketIO, emit
+from flask_login import LoginManager, login_required
+from flask_migrate import Migrate
 
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
-from database import db, Email, Settings
+from database import db, Email, Settings, User
 from utils import get_proxy, load_all_proxies
+from auth import auth_bp
 
 app = Flask(__name__)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = '67a5a25c-7acc-800f-bff4-1b84e2762944'
+app.config['ALLOW_REGISTRATION'] = False  # Set to True to enable registration
 
 socketio = SocketIO(app, async_mode='threading')
 
 db.init_app(app)
+migrate = Migrate(app, db)
+
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'auth.login'
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+app.register_blueprint(auth_bp)
 
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 2
@@ -106,11 +122,13 @@ def convert_to_american_format(phone_number: str) -> str:
     return phone_number
 
 @app.route('/')
+@login_required
 def index():
     emails = Email.query.all()
     return render_template('index.html', emails=emails)
 
 @app.route('/upload', methods=['POST'])
+@login_required
 def upload_emails():
     if request.method == 'POST':
         emails = request.files['email_file']
@@ -136,6 +154,7 @@ def upload_emails():
         return redirect(url_for('index'))
     
 @app.route('/get_modules')
+@login_required
 def get_modules():
     try:
         loaded_modules = ModuleLoader.load_modules('modules')
@@ -202,6 +221,7 @@ def get_modules():
         return jsonify({'modules': [], 'validmail_modules': []})
 
 @app.route('/perform_vm_check', methods=['POST'])
+@login_required
 def perform_vm_check():
     emails_to_lookup = request.json['selected_emails']
     selected_modules = request.json.get('selected_modules', [])
@@ -348,8 +368,8 @@ def process_email_for_validmail_check(app, email, loaded_modules, selected_modul
 
         return email_result
 
-
 @app.route('/perform_lookup', methods=['POST'])
+@login_required
 def perform_lookup():
     try:
         emails_to_lookup = request.json['selected_emails']
@@ -446,6 +466,7 @@ def process_email_for_lookup(app, email: str, proxies: List[str], settings: Dict
         return merged_result if results else None
 
 @app.route('/get_emails')
+@login_required
 def get_emails():
     page = int(request.args.get('page', 1))
     records_per_page = int(request.args.get('records_per_page', 50))
@@ -482,6 +503,7 @@ def get_emails():
     })
 
 @app.route('/delete_records', methods=['POST'])
+@login_required
 def delete_records():
     try:
         data = request.get_json()
@@ -537,6 +559,7 @@ def delete_records():
         }), 500
 
 @app.route('/perform_recovery_check', methods=['POST'])
+@login_required
 def perform_recovery_check():
     emails_to_lookup = request.json['selected_emails']
     recovery_results = []
@@ -716,6 +739,7 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
         return [task_obj] if result_found else []
 
 @app.route('/get_settings', methods=['GET'])
+@login_required
 def get_settings():
     try:
         settings = Settings.get_all_settings()
@@ -724,6 +748,7 @@ def get_settings():
         return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/update_settings', methods=['POST'])
+@login_required
 def update_settings():
     try:
         data = request.json
@@ -734,6 +759,7 @@ def update_settings():
         return jsonify({'success': False, 'message': str(e)})
 
 @app.route('/api/settings/<key>', methods=['GET'])
+@login_required
 def get_setting(key):
     try:
         value = Settings.get_setting(key)
