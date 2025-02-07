@@ -3,6 +3,13 @@ let currentPage = 1;
 let totalRecords = 0;
 let currentFilters = {};
 
+// Add these variables at the top of the file
+let statsStartTime = null;
+let statsInterval = null;
+let totalTasks = 0;
+let completedTasks = 0;
+let successfulTasks = 0;
+
 const tableBody = document.getElementById('email-table-body');
 const totalRecordsElem = document.getElementById('total-records');
 const statusMessage = document.getElementById('status-message');
@@ -191,6 +198,9 @@ async function performValidMailCheck() {
         return;
     }
 
+    // Initialize stats before starting the operation
+    initializeStats(selectedEmails.length);
+    
     $('#validMailCheckModal').modal('hide');
 
     try {
@@ -630,6 +640,7 @@ async function performLookup() {
 
     showOverlay("Loading, please wait...");
     const selectedEmails = executeAll ? await getAllMatchingEmails() : getSelectedEmails();
+    initializeStats(selectedEmails.length);
 
     if (selectedEmails.length === 0) {
         closeOverlay();
@@ -819,7 +830,7 @@ function populateStatusOptions(statuses) {
 
 async function performRecoveryCheck() {
     const executeAll = document.getElementById('execute-all').checked;
-    let selectedEmails = executeAll ? await getAllMatchingEmails() : getSelectedEmails();
+    const selectedEmails = executeAll ? await getAllMatchingEmails() : getSelectedEmails();
 
     if (selectedEmails.length === 0) {
         alert('Please select at least one email to perform recovery check.');
@@ -827,6 +838,8 @@ async function performRecoveryCheck() {
     }
 
     showOverlay("Loading, please wait...");
+    initializeStats(selectedEmails.length);
+    
     try {
         const response = await fetch('/perform_recovery_check', {
             method: 'POST',
@@ -901,12 +914,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const socket = io();
 
     socket.on('task_status', function(data) {
+        if (data.status === 'started') {
+            initializeStats(data.total);
+        }
         updateProgress(data.status);
     });
 
     socket.on('email_result', function(result) {
         const resultString = JSON.stringify(result, null, 2);
         updateProgress(resultString);
+        updateStats(result.success !== false);
+        
         const escapedEmail = CSS.escape(result.email);
         const row = document.getElementById(`email-${escapedEmail}`);
 
@@ -942,3 +960,52 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
 });
+
+function initializeStats(total) {
+    totalTasks = total;
+    completedTasks = 0;
+    successfulTasks = 0;
+    statsStartTime = new Date();
+    
+    document.getElementById('stats-panel').style.display = 'block';
+    
+    document.getElementById('total-tasks').textContent = totalTasks;
+    document.getElementById('completed-tasks').textContent = '0';
+    document.getElementById('success-rate').textContent = '0%';
+    document.getElementById('progress-bar').style.width = '0%';
+    
+    if (statsInterval) clearInterval(statsInterval);
+    statsInterval = setInterval(updateTimeElapsed, 1000);
+}
+
+function updateStats(success = true) {
+    completedTasks++;
+    if (success) successfulTasks++;
+    
+    const successRate = ((successfulTasks / completedTasks) * 100).toFixed(1);
+    const progress = ((completedTasks / totalTasks) * 100).toFixed(1);
+    
+    document.getElementById('completed-tasks').textContent = completedTasks;
+    document.getElementById('success-rate').textContent = `${successRate}%`;
+    document.getElementById('progress-bar').style.width = `${progress}%`;
+    
+    if (completedTasks >= totalTasks) {
+        clearInterval(statsInterval);
+        setTimeout(() => {
+            document.getElementById('stats-panel').style.display = 'none';
+        }, 5000);
+    }
+}
+
+function updateTimeElapsed() {
+    if (!statsStartTime) return;
+    
+    const now = new Date();
+    const diff = now - statsStartTime;
+    const hours = Math.floor(diff / 3600000);
+    const minutes = Math.floor((diff % 3600000) / 60000);
+    const seconds = Math.floor((diff % 60000) / 1000);
+    
+    document.getElementById('time-elapsed').textContent = 
+        `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}

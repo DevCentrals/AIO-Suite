@@ -28,7 +28,6 @@ socketio = SocketIO(app, async_mode='threading')
 db.init_app(app)
 
 MAX_RETRIES = 3
-TASK_TIMEOUT = 30
 RETRY_DELAY_SECONDS = 2
 DIRECTORIES = ['modules', 'additional_modules', 'validmail_modules', 'search_modules', 'instance']
 EMAIL_REGEX = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
@@ -213,7 +212,10 @@ def perform_vm_check():
     settings = Settings.get_all_settings()
     max_concurrent_tasks = int(settings.get('threads', 10))
 
-    socketio.emit('task_status', {'status': 'Valid-Mail check started...'})
+    socketio.emit('task_status', {
+        'status': 'started',
+        'total': len(emails_to_lookup)
+    })
 
     if not selected_modules:
         selected_modules = list(loaded_modules.keys())
@@ -236,7 +238,7 @@ def perform_vm_check():
                 futures[executor.submit(
                     process_email_for_validmail_check,
                     current_app._get_current_object(),
-                    email_record,
+                    email_record.email,
                     loaded_modules,
                     selected_modules,
                     proxies,
@@ -252,8 +254,13 @@ def perform_vm_check():
 
     return jsonify({'success': True, 'results': validmail_results})
 
-def process_email_for_validmail_check(app, email_record, loaded_modules, selected_modules, proxies, module_settings, max_retries=3):
+def process_email_for_validmail_check(app, email, loaded_modules, selected_modules, proxies, module_settings, max_retries=3):
     with app.app_context():
+        email_record = db.session.query(Email).filter_by(email=email).first()
+        if not email_record:
+            print(f"Error: Email record not found for {email}")
+            return None
+
         validmail_modules = {
             module_name: loaded_modules[module_name]
             for module_name in selected_modules if module_name in loaded_modules
@@ -271,18 +278,20 @@ def process_email_for_validmail_check(app, email_record, loaded_modules, selecte
             "dob": email_record.dob or "",
         }
 
-        tasks = []
+        any_success = False
+        processed_modules = []
+
         for module_name, module in validmail_modules.items():
             if selected_modules and module_name not in selected_modules:
                 continue
 
             if email_record.validmail_results and module_name in email_record.validmail_results:
-                print(f"Email {task_obj['email']} already processed for {module_name}, skipping...")
+                any_success = True
+                processed_modules.append(module_name)
                 continue
 
             processor_class = getattr(module, 'ValidMailChecker', None)
             if processor_class is None:
-                print(f"No ValidMailChecker class found in module {module_name}")
                 continue
 
             instance = processor_class()
@@ -297,38 +306,48 @@ def process_email_for_validmail_check(app, email_record, loaded_modules, selecte
                         settings_for_module,
                         proxy
                     )
-                    if is_valid_mail is None:
-                        print(f"Not updating Records due to uncertain outcome")
-                        break
-                    email = db.session.query(Email).filter_by(email=task_obj['email']).first()
-                    if email:
-                        email.update_validmail_results(module_name, is_valid_mail)
-                        print(f"Updated validmail_results for {task_obj['email']} with module: {module_name}")
-                        validmail_results = email.validmail_results or {}
-                        email_result = {
-                            'email': task_obj['email'],
-                            'name': email.name or 'N/A',
-                            'address': email.address or 'N/A',
-                            'dob': email.dob or 'N/A',
-                            'status': 'Valid-Mail-Checked',
-                            'phone_numbers': phone_numbers,
-                            'validmail_results': validmail_results
-                        }
+                    if is_valid_mail is not None:
+                        any_success = True
+                        processed_modules.append(module_name)
 
-                        socketio.emit('email_result', email_result)
-                    else:
-                        print(f"Email {task_obj['email']} not found in the database.")
+                        email = db.session.query(Email).filter_by(email=task_obj['email']).first()
+                        if email:
+                            email.update_validmail_results(module_name, is_valid_mail)
+                            db.session.commit()
+
                     break
-                except Exception as main_error:
-                    print(f"An error occurred for {task_obj['email']} with module {module_name}: {main_error}")
+                except Exception as error:
                     proxy_retry_count += 1
-                    print(f"Retrying with a new proxy ({proxy_retry_count}/{max_retries})")
+                    if proxy_retry_count >= max_retries:
+                        print(f"Failed after {max_retries} retries for {task_obj['email']} with {module_name}")
 
-            if proxy_retry_count == max_retries:
-                print(f"Failed to process task for {task_obj['email']} with module {module_name} after {max_retries} retries.")
+        db.session.refresh(email_record)
 
-            tasks.append(task_obj)
-        return tasks
+        validmail_results = email_record.validmail_results or {}
+        if isinstance(validmail_results, str):
+            try:
+                validmail_results = json.loads(validmail_results)
+            except json.JSONDecodeError:
+                validmail_results = {}
+
+        email_result = {
+            'email': email_record.email,
+            'name': email_record.name or 'N/A',
+            'address': email_record.address or 'N/A',
+            'dob': email_record.dob or 'N/A',
+            'status': 'Valid-Mail-Checked',
+            'phone_numbers': phone_numbers,
+            'validmail_results': validmail_results,
+            'success': any_success,
+            'processed_modules': processed_modules
+        }
+
+        #print("Debug - Validmail Results Before Emitting:", json.dumps(validmail_results, indent=2))
+
+        socketio.emit('email_result', email_result)
+
+        return email_result
+
 
 @app.route('/perform_lookup', methods=['POST'])
 def perform_lookup():
@@ -342,7 +361,10 @@ def perform_lookup():
         settings = Settings.get_all_settings()
         max_concurrent_tasks = int(settings.get('threads', 10))
 
-        socketio.emit('task_status', {'status': 'Task started, processing...'})
+        socketio.emit('task_status', {
+            'status': 'started',
+            'total': len(emails_to_lookup)
+        })
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent_tasks) as executor:
             futures = {}
@@ -351,6 +373,7 @@ def perform_lookup():
                 if email_record:
                     futures[executor.submit(
                         process_email_for_lookup,
+                        current_app._get_current_object(),
                         email_record.email,
                         proxies,
                         settings,
@@ -361,8 +384,6 @@ def perform_lookup():
                 result = future.result()
                 if result:
                     lookup_results.append(result)
-                    socketio.emit('email_result', result)
-                    
                     email = futures[future]
                     email.update_info(
                         name=result.get('name', ""),
@@ -378,37 +399,51 @@ def perform_lookup():
         print(f"Error in perform_lookup: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-def process_email_for_lookup(email: str, proxies: List[str], settings: Dict[str, str], selected_modules) -> Optional[Dict[str, Any]]:
-    search_processor = SearchProcessor()
+def process_email_for_lookup(app, email: str, proxies: List[str], settings: Dict[str, str], selected_modules) -> Optional[Dict[str, Any]]:
+    with app.app_context():
+        search_processor = SearchProcessor()
         
-    results = []
-    for module_name in selected_modules:
-        module_settings = {
-            key: settings.get(key)
-            for key in search_processor.required_settings.get(module_name, [])
+        results = []
+        for module_name in selected_modules:
+            module_settings = {
+                key: settings.get(key)
+                for key in search_processor.required_settings.get(module_name, [])
+            }
+            
+            result = asyncio.run(search_processor.process_email(email, module_name, module_settings, proxies))
+            if result.success and result.data:
+                results.append(result.data)
+        
+        merged_result = {}
+        if results:
+            merged_result = results[0].copy()
+            for result in results[1:]:
+                for key, value in result.items():
+                    if key not in merged_result or not merged_result[key]:
+                        merged_result[key] = value
+                    elif isinstance(value, list):
+                        merged_result[key] = list(set(merged_result[key] + value))
+            
+            if 'phone_numbers' in merged_result:
+                merged_result['phone_numbers'] = [
+                    convert_to_american_format(num) 
+                    for num in merged_result['phone_numbers']
+                ]
+        
+        email_record = db.session.query(Email).filter_by(email=email).first()
+        result_to_emit = {
+            'email': email,
+            'name': merged_result.get('name', email_record.name if email_record else 'N/A'),
+            'address': merged_result.get('address', email_record.address if email_record else 'N/A'),
+            'dob': merged_result.get('dob', email_record.dob if email_record else 'N/A'),
+            'phone_numbers': merged_result.get('phone_numbers', []),
+            'status': 'Searched',
+            'success': bool(results)
         }
         
-        result = asyncio.run(search_processor.process_email(email, module_name, module_settings, proxies))
-        if result.success and result.data:
-            results.append(result.data)
-    
-    if results:
-        merged_result = results[0].copy()
-        for result in results[1:]:
-            for key, value in result.items():
-                if key not in merged_result or not merged_result[key]:
-                    merged_result[key] = value
-                elif isinstance(value, list):
-                    merged_result[key] = list(set(merged_result[key] + value))
+        socketio.emit('email_result', result_to_emit)
         
-        if 'phone_numbers' in merged_result:
-            merged_result['phone_numbers'] = [
-                convert_to_american_format(num) 
-                for num in merged_result['phone_numbers']
-            ]
-        
-        return merged_result
-    return None
+        return merged_result if results else None
 
 @app.route('/get_emails')
 def get_emails():
@@ -526,7 +561,10 @@ def perform_recovery_check():
     settings = Settings.get_all_settings()
     max_concurrent_tasks = int(settings.get('threads', 10))
 
-    socketio.emit('task_status', {'status': 'Recovery check started...'})
+    socketio.emit('task_status', {
+        'status': 'started',
+        'total': len(emails_to_lookup)
+    })
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent_tasks) as executor:
         futures = {}
@@ -595,7 +633,10 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
             'status': 'Recovery-Checked',
             'phone_numbers': phone_numbers
         }
-        socketio.emit('email_result', email_result)
+        socketio.emit('email_result', {
+            **email_result,
+            'success': True
+        })
 
     def get_domain_instances(modules_dict):
         instances = []
@@ -617,7 +658,16 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
     with app.app_context():
         phone_numbers = email_record.phone_numbers
         if not phone_numbers:
-            print(f"Skipping email {email_record.email} because it has no phone numbers.")
+            email_result = {
+                'email': email_record.email,
+                'name': email_record.name or 'N/A',
+                'address': email_record.address or 'N/A',
+                'dob': email_record.dob or 'N/A',
+                'status': 'Skipped-No-Numbers',
+                'phone_numbers': [],
+                'success': False
+            }
+            socketio.emit('email_result', email_result)
             return []
         
         if isinstance(phone_numbers, str):
@@ -652,11 +702,18 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
             else:
                 print(f"All additional modules processed for {task_obj['email']}, no result found.")
 
-        if result_found:
-            return [task_obj]
+        email_result = {
+            'email': email_record.email,
+            'name': email_record.name or 'N/A',
+            'address': email_record.address or 'N/A',
+            'dob': email_record.dob or 'N/A',
+            'status': 'Recovery-Checked',
+            'phone_numbers': phone_numbers,
+            'success': result_found
+        }
+        socketio.emit('email_result', email_result)
 
-        print(f"No results found for {task_obj['email']} after processing all modules.")
-        return [task_obj]
+        return [task_obj] if result_found else []
 
 @app.route('/get_settings', methods=['GET'])
 def get_settings():

@@ -236,3 +236,34 @@ h2, h3 {
 .form-check-input {
     margin-right: 10px;
 }
+
+/* Statistics Panel Styles */
+.stat-box {
+    text-align: center;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    margin-bottom: 10px;
+}
+
+.stat-box h5 {
+    color: #6c757d;
+    font-size: 14px;
+    margin-bottom: 8px;
+}
+
+.stat-box span {
+    font-size: 24px;
+    font-weight: bold;
+    color: #007bff;
+}
+
+.progress {
+    height: 20px;
+    border-radius: 10px;
+}
+
+.progress-bar {
+    background-color: #007bff;
+    transition: width 0.3s ease;
+}
