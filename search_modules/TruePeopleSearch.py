@@ -226,12 +226,14 @@ class SearchAPIProcessor:
     def supports_email(self, email: str) -> bool:
         return True
 
-    def get_captcha_solution(self, selected_proxy, url, htmlbase64):
+    def get_captcha_solution(self, selected_proxy, url, htmlbase64, max_execution_time=30):
+        start_time = time.time()
         proxy_type, rest = selected_proxy.split("://")
         login_info, proxy_info = rest.split("@")
         proxy_login, proxy_password = login_info.split(":")
         proxy_address, proxy_port = proxy_info.split(":")
-        while True:
+        
+        while True:               
             try:
                 payload = {
                     "clientKey": self.CAPMON_KEY,
@@ -251,16 +253,19 @@ class SearchAPIProcessor:
                 }
 
                 response = requests.post("https://api.capmonster.cloud/createTask", json=payload)
-                #print(response.text)
                 task_id = response.json().get("taskId")
 
                 while True:
+                    # Check timeout in inner loop as well
+                    if time.time() - start_time > max_execution_time:
+                        print("Maximum execution time exceeded")
+                        return None
+                        
                     task_result_payload = {
                         "clientKey": self.CAPMON_KEY,
                         "taskId": task_id
                     }
                     response = requests.post("https://api.capmonster.cloud/getTaskResult", json=task_result_payload)
-                    #print(response.text)
 
                     if response.status_code == 403:
                         print("Received a 403 error. Check your API key, task ID, or possible IP blocking.")
@@ -278,9 +283,11 @@ class SearchAPIProcessor:
             except Exception as e:
                 print(e)
                 traceback.format_exc()
-            
-    def get_turnstile_solution(self):
-        while True:
+                
+    def get_turnstile_solution(self, max_execution_time=30):
+        start_time = time.time()
+        
+        while True:           
             try:
                 payload = {
                     "clientKey": self.CAPMON_KEY,
@@ -295,14 +302,17 @@ class SearchAPIProcessor:
                 task_id = response.json().get("taskId")
 
                 while True:
+                    if time.time() - start_time > max_execution_time:
+                        print("Maximum solve time exceeded")
+                        return None
+                        
                     task_result_payload = {
                         "clientKey": self.CAPMON_KEY,
                         "taskId": task_id
                     }
                     response = requests.post("https://api.capmonster.cloud/getTaskResult", json=task_result_payload)
-                    #print(response.text)
+                    
                     if response.status_code == 403:
-                        #print("Received a 403 error. Check your API key, task ID, or possible IP blocking.")
                         raise Exception
 
                     if "ERROR_" in response.text:
@@ -316,5 +326,4 @@ class SearchAPIProcessor:
                         return token
                     time.sleep(1)
             except Exception as e:
-                #print(e)
                 raise Exception
