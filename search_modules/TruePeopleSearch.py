@@ -77,11 +77,12 @@ class SearchAPIProcessor:
         }
 
         url = f'https://www.truepeoplesearch.com/resultemail?email={corrected_email}'
-        response = session.get(url, headers=headers, impersonate="chrome124")
-        htmlbase64 = base64.b64encode(response.text.encode()).decode()
-        cf_clearance = self.get_captcha_solution(self.proxy, url, htmlbase64)
-        session.cookies.set("cf_clearance", cf_clearance)
-        response = session.get(url, headers=headers, impersonate="chrome124")
+        response = session.get(url, headers=headers, impersonate="chrome123")
+        if "Captcha Challenge" in response.text:
+            htmlbase64 = base64.b64encode(response.text.encode()).decode()
+            cf_clearance = self.get_captcha_solution(self.proxy, url, htmlbase64)
+            session.cookies.set("cf_clearance", cf_clearance)
+            response = session.get(url, headers=headers, impersonate="chrome123")
         
         if "internalcaptcha" in response.text or "Captcha" in response.text:
             print(f"Solving Internal Captcha")
@@ -124,7 +125,7 @@ class SearchAPIProcessor:
                 data=token,
             )
 
-            response = session.post('https://www.truepeoplesearch.com/internalcaptcha/captchasubmit',params=params,headers=headers, multipart=mp, allow_redirects=False, impersonate="chrome124")
+            response = session.post('https://www.truepeoplesearch.com/internalcaptcha/captchasubmit',params=params,headers=headers, multipart=mp, allow_redirects=False, impersonate="chrome123")
             if "Invalid captcha" in response.text:
                 raise Exception("Turnstile Captcha Failed")
             #print(response.text)
@@ -144,7 +145,7 @@ class SearchAPIProcessor:
                 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
             }
             url = f'https://www.truepeoplesearch.com/resultemail?email={corrected_email}'
-            response = session.get(url, headers=headers, impersonate="chrome124")
+            response = session.get(url, headers=headers, impersonate="chrome123")
         if "Attention Required!" in response.text:
             raise Exception("Cloudflare Attack Protection")
         
@@ -227,13 +228,13 @@ class SearchAPIProcessor:
         return True
 
     def get_captcha_solution(self, selected_proxy, url, htmlbase64, max_execution_time=30):
-        start_time = time.time()
         proxy_type, rest = selected_proxy.split("://")
         login_info, proxy_info = rest.split("@")
         proxy_login, proxy_password = login_info.split(":")
         proxy_address, proxy_port = proxy_info.split(":")
         
-        while True:               
+        while True:     
+            start_time = time.time()          
             try:
                 payload = {
                     "clientKey": self.CAPMON_KEY,
@@ -256,7 +257,6 @@ class SearchAPIProcessor:
                 task_id = response.json().get("taskId")
 
                 while True:
-                    # Check timeout in inner loop as well
                     if time.time() - start_time > max_execution_time:
                         print("Maximum execution time exceeded")
                         return None
