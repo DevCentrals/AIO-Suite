@@ -402,15 +402,17 @@ def perform_lookup():
 
             for future in concurrent.futures.as_completed(futures):
                 result = future.result()
+                email = futures[future]
                 if result:
                     lookup_results.append(result)
-                    email = futures[future]
                     email.update_info(
                         name=result.get('name', ""),
                         address=result.get('address', ""),
                         dob=result.get('dob', "")
                     )
                     email.update_autodoxed(result.get('phone_numbers', []))
+                email.status = "Searched"
+                db.session.commit()
 
         socketio.emit('task_status', {'status': 'Task completed, check results.'})
         return jsonify({'success': True, 'results': lookup_results})
