@@ -488,21 +488,35 @@ async function executeExport() {
     const fileType = format === 'csv' ? 'text/csv' : 'text/plain';
 
     try {
-        const fileHandle = await window.showSaveFilePicker({
-            suggestedName: `exported_records.${format}`,
-            types: [
-                {
-                    description: `${format.toUpperCase()} File`,
-                    accept: { [fileType]: [`.${format}`] }
-                }
-            ]
-        });
+        if ('showSaveFilePicker' in window) {
+            const fileHandle = await window.showSaveFilePicker({
+                suggestedName: `exported_records.${format}`,
+                types: [
+                    {
+                        description: `${format.toUpperCase()} File`,
+                        accept: { [fileType]: [`.${format}`] }
+                    }
+                ]
+            });
 
-        const writableStream = await fileHandle.createWritable();
-        await writableStream.write(fileContent);
-        await writableStream.close();
+            const writableStream = await fileHandle.createWritable();
+            await writableStream.write(fileContent);
+            await writableStream.close();
 
-        alert('File saved successfully!');
+            alert('File saved successfully!');
+        } else {
+            const blob = new Blob([fileContent], { type: fileType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `exported_records.${format}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            alert('File saved successfully!');
+        }
     } catch (error) {
         if (error.name !== 'AbortError') {
             console.error('Error saving file:', error);
@@ -513,6 +527,7 @@ async function executeExport() {
     const modal = bootstrap.Modal.getInstance(document.getElementById('exportFormatModal'));
     modal.hide();
 }
+
 
 async function getFilteredRecords() {
     const filters = {
