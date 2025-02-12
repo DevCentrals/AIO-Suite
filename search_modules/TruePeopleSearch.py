@@ -45,6 +45,7 @@ class SearchAPIProcessor:
 
         return local_part + converted_domain
     
+    
     def clean_text(self, text):
         return re.sub(r'\s+', ' ', text.strip())
     
@@ -63,6 +64,33 @@ class SearchAPIProcessor:
 
         headers = {
             'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'accept-language': 'en-US,en;q=0.9,nl-NL;q=0.8,nl;q=0.7',
+            'cache-control': 'no-cache',
+            'pragma': 'no-cache',
+            'priority': 'u=0, i',
+            'sec-ch-ua': '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"',
+            'sec-ch-ua-arch': '"x86"',
+            'sec-ch-ua-bitness': '"64"',
+            'sec-ch-ua-full-version': '"133.0.6943.59"',
+            'sec-ch-ua-full-version-list': '"Not(A:Brand";v="99.0.0.0", "Google Chrome";v="133.0.6943.59", "Chromium";v="133.0.6943.59"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-model': '""',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-ch-ua-platform-version': '"19.0.0"',
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'none',
+            'sec-fetch-user': '?1',
+            'upgrade-insecure-requests': '1',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36'
+        }
+
+        response = requests.get('https://capmonster.cloud/api/useragent/actual', headers=headers)
+
+        user_agent = response.text
+        
+        headers = {
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
             'accept-language': 'en-US,en;q=0.9',
             'priority': 'u=0, i',
             'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
@@ -73,14 +101,14 @@ class SearchAPIProcessor:
             'sec-fetch-site': 'none',
             'sec-fetch-user': '?1',
             'upgrade-insecure-requests': '1',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+            'user-agent': user_agent,
         }
 
         url = f'https://www.truepeoplesearch.com/resultemail?email={corrected_email}'
         response = session.get(url, headers=headers, impersonate="chrome123")
         if "Captcha Challenge" in response.text:
             htmlbase64 = base64.b64encode(response.text.encode()).decode()
-            cf_clearance = self.get_captcha_solution(self.proxy, url, htmlbase64)
+            cf_clearance = self.get_captcha_solution(user_agent, self.proxy, url, htmlbase64)
             session.cookies.set("cf_clearance", cf_clearance)
             response = session.get(url, headers=headers, impersonate="chrome123")
         
@@ -106,7 +134,7 @@ class SearchAPIProcessor:
                 'sec-fetch-dest': 'empty',
                 'sec-fetch-mode': 'cors',
                 'sec-fetch-site': 'same-origin',
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+                'user-agent': user_agent,
                 'x-requested-with': 'XMLHttpRequest',
             }
 
@@ -142,7 +170,7 @@ class SearchAPIProcessor:
                 'sec-fetch-site': 'none',
                 'sec-fetch-user': '?1',
                 'upgrade-insecure-requests': '1',
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+                'user-agent': user_agent,
             }
             url = f'https://www.truepeoplesearch.com/resultemail?email={corrected_email}'
             response = session.get(url, headers=headers, impersonate="chrome123")
@@ -171,7 +199,7 @@ class SearchAPIProcessor:
             'sec-fetch-site': 'none',
             'sec-fetch-user': '?1',
             'upgrade-insecure-requests': '1',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+            'user-agent': user_agent,
         }
 
         response = session.get(f'https://www.truepeoplesearch.com{data_detail_link}', headers=headers)
@@ -227,7 +255,7 @@ class SearchAPIProcessor:
     def supports_email(self, email: str) -> bool:
         return True
 
-    def get_captcha_solution(self, selected_proxy, url, htmlbase64, max_execution_time=30):
+    def get_captcha_solution(self, user_agent, selected_proxy, url, htmlbase64, max_execution_time=30):
         proxy_type, rest = selected_proxy.split("://")
         login_info, proxy_info = rest.split("@")
         proxy_login, proxy_password = login_info.split(":")
@@ -244,7 +272,7 @@ class SearchAPIProcessor:
                     "websiteKey":"xxxxxxxxxx",
                     "cloudflareTaskType": "cf_clearance",
                     "htmlPageBase64": htmlbase64,
-                    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+                    "userAgent": user_agent,
                     "proxyType": proxy_type,
                     "proxyAddress": proxy_address,
                     "proxyPort": int(proxy_port),
