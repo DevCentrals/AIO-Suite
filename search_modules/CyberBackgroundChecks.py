@@ -1,23 +1,14 @@
 from bs4 import BeautifulSoup
 from typing import Optional, Dict, List
 import time
-from curl_cffi import CurlMime, requests
 import requests
 import tls_client
 import json
 import collections
 collections.Callable = collections.abc.Callable
-from bs4 import BeautifulSoup
-import math
-import random
-from concurrent.futures import ThreadPoolExecutor
 import logging
 import time
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
-
-import re
-import base64
-import traceback
 
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 1
