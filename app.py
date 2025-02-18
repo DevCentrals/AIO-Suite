@@ -25,8 +25,15 @@ app = Flask(__name__)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_size': 20,
+    'max_overflow': 30,
+    'pool_timeout': 60,
+    'pool_recycle': 1800,
+    'pool_pre_ping': True
+}
 app.config['SECRET_KEY'] = '67a5a25c-7acc-800f-bff4-1b84e2762944'
-app.config['ALLOW_REGISTRATION'] = False  # Set to True to enable registration
+app.config['ALLOW_REGISTRATION'] = False
 
 socketio = SocketIO(app, async_mode='threading')
 
