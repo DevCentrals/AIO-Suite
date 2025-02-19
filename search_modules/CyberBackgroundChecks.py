@@ -2,7 +2,7 @@ from bs4 import BeautifulSoup
 from typing import Optional, Dict, List
 import time
 import requests
-import tls_client
+from curl_cffi import requests
 import json
 import collections
 collections.Callable = collections.abc.Callable
@@ -25,7 +25,7 @@ class SearchAPIProcessor:
         print(f"Processing {email} with CyberBackgroundChecks")
         self.proxy = proxy
         
-        session = tls_client.Session(client_identifier="Firefox110", random_tls_extension_order=True)
+        session = requests.Session()
         session.proxies = {'http': proxy, 'https': proxy}
         response, details = self.get_details(session, email)
 
@@ -87,7 +87,8 @@ class SearchAPIProcessor:
         }
 
         try:
-            response = session.get(f'https://www.cyberbackgroundchecks.com/email/{email.replace("@", "_.")}', headers=headers)
+            response = session.get(f'https://www.cyberbackgroundchecks.com/email/{email.replace("@", "_.")}', headers=headers, impersonate="chrome133a")
+            #print(response.text)
             if "Just a moment..." in response.text:
                 raise Exception("Cloudflare")
             #print(response.text)
