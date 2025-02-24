@@ -88,9 +88,13 @@ class SearchAPIProcessor:
 
         try:
             response = session.get(f'https://www.cyberbackgroundchecks.com/email/{email.replace("@", "_.")}', headers=headers, impersonate="chrome133a")
-            #print(response.text)
+            
             if "Just a moment..." in response.text:
                 raise Exception("Cloudflare")
+            if "Before we continue..." in response.text:
+                raise Exception("PerimeterX")
+
+            #print(response.text)
             #print(response.text)
 
             if response.status_code == 200 and '[{"@context":"http://schema.org","@type":"Person"' in response.text:
