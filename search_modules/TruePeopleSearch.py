@@ -174,13 +174,14 @@ class SearchAPIProcessor:
             }
             url = f'https://www.truepeoplesearch.com/resultemail?email={corrected_email}'
             response = session.get(url, headers=headers, impersonate="chrome133a")
+            #print(response.text)
         if "Attention Required!" in response.text:
             raise Exception("Cloudflare Attack Protection")
         
         soup = BeautifulSoup(response.text, 'html.parser')
 
         div_element = soup.find('div', class_='card-summary')
-
+        #print(div_element)
         if div_element:
             data_detail_link = div_element.get('data-detail-link', '')
         else:
@@ -202,7 +203,7 @@ class SearchAPIProcessor:
             'user-agent': user_agent,
         }
 
-        response = session.get(f'https://www.truepeoplesearch.com{data_detail_link}', headers=headers)
+        response = session.get(f'https://www.truepeoplesearch.com{data_detail_link}', headers=headers, impersonate="chrome133a")
         #print(response.text)
         soup = BeautifulSoup(response.text, 'html.parser')
 
