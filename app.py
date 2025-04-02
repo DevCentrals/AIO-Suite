@@ -505,6 +505,38 @@ def get_emails():
                 func.json_extract(Email.validmail_results, f'$.{module_name}').cast(db.Boolean) == (True if is_valid else False)
             )
 
+    if filters.get('has_name'):
+        query = query.filter(Email.name != None, Email.name != '', Email.name != 'N/A')
+    if filters.get('has_phone'):
+        query = query.filter(Email.phone_numbers != None, Email.phone_numbers != '', Email.phone_numbers != 'N/A')
+    if filters.get('has_address'):
+        query = query.filter(Email.address != None, Email.address != '', Email.address != 'N/A')
+    if filters.get('has_dob'):
+        query = query.filter(Email.dob != None, Email.dob != '', Email.dob != 'N/A')
+
+    if filters.get('vm_status'):
+        vm_status = filters['vm_status']
+        if vm_status == 'valid':
+            query = query.filter(Email.validmail_results != None)
+            query = query.filter(
+                func.json_extract(Email.validmail_results, '$') != '{}'
+            )
+        elif vm_status == 'invalid':
+            query = query.filter(Email.validmail_results != None)
+            query = query.filter(
+                func.json_extract(Email.validmail_results, '$') != '{}'
+            )
+        elif vm_status == 'all-valid':
+            query = query.filter(Email.validmail_results != None)
+            query = query.filter(
+                func.json_extract(Email.validmail_results, '$') != '{}'
+            )
+        elif vm_status == 'all-invalid':
+            query = query.filter(Email.validmail_results != None)
+            query = query.filter(
+                func.json_extract(Email.validmail_results, '$') != '{}'
+            )
+
     total = query.count()
 
     if fetch_all:
@@ -652,7 +684,7 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
                 proxy_retry_count += 1
                 print(f"Retrying with a new proxy ({proxy_retry_count}/{max_retries})")
         
-        print(f"Failed to process task for {task_obj['email']} with module {module_instance.__class__.__name__} after {max_retries} retries.")
+        print(f"Failed to process task for {task_obj['email']} with module {module_instance.__class__.__name__} (from {module_name}) after {max_retries} retries.")
         return False
 
     def update_email_record(email_address, censored_number, module_name):

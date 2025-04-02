@@ -68,6 +68,34 @@ class SearchAPIProcessor:
             'cache-control': 'no-cache',
             'pragma': 'no-cache',
             'priority': 'u=0, i',
+            'sec-ch-ua': '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"',
+            'sec-ch-ua-arch': '"x86"',
+            'sec-ch-ua-bitness': '"64"',
+            'sec-ch-ua-full-version': '"133.0.6943.59"',
+            'sec-ch-ua-full-version-list': '"Not(A:Brand";v="99.0.0.0", "Google Chrome";v="133.0.6943.59", "Chromium";v="133.0.6943.59"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-model': '""',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-ch-ua-platform-version': '"19.0.0"',
+            'sec-fetch-dest': 'document',
+            'sec-fetch-mode': 'navigate',
+            'sec-fetch-site': 'none',
+            'sec-fetch-user': '?1',
+            'upgrade-insecure-requests': '1',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36'
+        }
+
+        response = requests.get('https://capmonster.cloud/api/useragent/actual', headers=headers)
+
+        user_agent = response.text
+        print(user_agent)
+        
+        headers = {
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'accept-language': 'en-US,en;q=0.9,nl-NL;q=0.8,nl;q=0.7',
+            'cache-control': 'no-cache',
+            'pragma': 'no-cache',
+            'priority': 'u=0, i',
             'referer': 'https://www.cyberbackgroundchecks.com/email',
             'sec-ch-ua': '"Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"',
             'sec-ch-ua-arch': '"x86"',
@@ -83,19 +111,17 @@ class SearchAPIProcessor:
             'sec-fetch-site': 'same-origin',
             'sec-fetch-user': '?1',
             'upgrade-insecure-requests': '1',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+            'user-agent': user_agent,
         }
 
         try:
-            response = session.get(f'https://www.cyberbackgroundchecks.com/email/{email.replace("@", "_.")}', headers=headers, impersonate="chrome133a")
-            
+            response = session.get(f'https://www.cyberbackgroundchecks.com/email/{email.replace("@", "_.")}', headers=headers, impersonate="firefox135")
+            print(response.text)
             if "Just a moment..." in response.text:
                 raise Exception("Cloudflare")
             if "Before we continue..." in response.text:
                 raise Exception("PerimeterX")
 
-            #print(response.text)
-            #print(response.text)
 
             if response.status_code == 200 and '[{"@context":"http://schema.org","@type":"Person"' in response.text:
                 details = json.loads('[{"@context":"http://schema.org","@type":"Person"' +

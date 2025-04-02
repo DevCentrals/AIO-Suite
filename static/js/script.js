@@ -698,22 +698,96 @@ function getSelectedEmails() {
         .map(checkbox => checkbox.closest('tr').querySelector('td:nth-child(2)').textContent.trim());
 }
 
+function resetFilters() {
+  document.getElementById('filter-domain').value = '';
+  document.getElementById('status-filter').value = '';
+  
+  document.getElementById('has-name').checked = false;
+  document.getElementById('has-phone').checked = false;
+  document.getElementById('has-address').checked = false;
+  document.getElementById('has-dob').checked = false;
+  
+  document.getElementById('vm-status').value = '';
+  document.getElementById('module-filter').selectedIndex = -1;
+  
+  currentFilters = {};
+  fetchRecords(1);
+}
+
 function applyFilters() {
+    currentFilters = {};
+    
     const domain = document.getElementById('filter-domain').value;
     const status = document.getElementById('status-filter').value;
-
-    const selectedModules = Array.from(document.getElementById('module-filter').selectedOptions).map(option => option.value);
-
-    currentFilters = {};
+    
     if (domain) currentFilters.domain = domain;
     if (status) currentFilters.status = status;
-    if (selectedModules.length > 0) currentFilters.module_results = selectedModules.reduce((acc, module) => {
-        acc[module] = true;
-        return acc;
-    }, {});
-
-    fetchRecords(currentPage, currentFilters);
-}
+    
+    if (document.getElementById('has-name').checked) {
+      currentFilters.has_name = true;
+    }
+    if (document.getElementById('has-phone').checked) {
+      currentFilters.has_phone = true;
+    }
+    if (document.getElementById('has-address').checked) {
+      currentFilters.has_address = true;
+    }
+    if (document.getElementById('has-dob').checked) {
+      currentFilters.has_dob = true;
+    }
+    
+    const vmStatus = document.getElementById('vm-status').value;
+    if (vmStatus) {
+      currentFilters.vm_status = vmStatus;
+    }
+    
+    const selectedModules = Array.from(document.getElementById('module-filter').selectedOptions)
+      .map(option => option.value);
+    
+    if (selectedModules.length > 0) {
+      currentFilters.module_results = {};
+      selectedModules.forEach(module => {
+        currentFilters.module_results[module] = true; // Default to valid
+      });
+    }
+    
+    const filtersParam = encodeURIComponent(JSON.stringify(currentFilters));
+    
+    fetch(`/get_emails?page=1&records_per_page=${recordsPerPage}&filters=${filtersParam}`)
+      .then(response => response.json())
+      .then(data => {
+        tableBody.innerHTML = data.records.map(record => {
+          const formattedValidmailResults = record.validmail_results ?
+            Object.entries(record.validmail_results).map(([module, result]) => {
+              return `<strong>${module}</strong>: ${result ? 'Valid' : 'Invalid'}`;
+            }).join('<br>') :
+            'N/A';
+  
+          return `
+            <tr id="email-${CSS.escape(record.email)}" data-email="${CSS.escape(record.email)}">
+              <td><input type="checkbox" name="selected_emails" value="${record.id}"></td>
+              <td>${record.email}</td>
+              <td id="status-${CSS.escape(record.email)}">${record.status || 'N/A'}</td>
+              <td id="name-${CSS.escape(record.email)}">${record.name || 'N/A'}</td>
+              <td id="phone_numbers-${CSS.escape(record.email)}">${record.phone_numbers || 'N/A'}</td>
+              <td id="address-${CSS.escape(record.email)}">${record.address || 'N/A'}</td>
+              <td id="dob-${CSS.escape(record.email)}">${record.dob || 'N/A'}</td>
+              <td id="validmail_results-${CSS.escape(record.email)}">${formattedValidmailResults}</td>
+            </tr>`;
+        }).join('');
+  
+        totalRecords = data.total;
+        totalRecordsElem.textContent = `Total Records: ${totalRecords}`;
+        updatePagination();
+        populateStatusOptions(data.statuses);
+        populateModuleFilter();
+      })
+      .catch(error => {
+        console.error('Error fetching filtered records:', error);
+      });
+  
+    $('#filterModal').modal('hide');
+  }
 
 async function deleteSelectedRecords() {
     const selectedEmails = getSelectedEmails();
