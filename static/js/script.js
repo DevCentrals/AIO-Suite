@@ -295,7 +295,7 @@ function updateProgress(message) {
     progressMessageElem.textContent = message;
 }
 
-function showExportFormatModal() {
+async function showExportFormatModal() {
     const modalHTML = `
     <div class="modal fade" id="exportFormatModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog">
@@ -359,7 +359,7 @@ function showExportFormatModal() {
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary" onclick="executeExport()">Export</button>
+                    <button type="button" class="btn btn-primary" id="exportButton">Export</button>
                 </div>
             </div>
         </div>
@@ -368,10 +368,149 @@ function showExportFormatModal() {
     if (!document.getElementById('exportFormatModal')) {
         document.body.insertAdjacentHTML('beforeend', modalHTML);
         initializeDragAndDrop();
+
+        // Attach event listener to the Export button
+        const exportButton = document.getElementById('exportButton');
+        exportButton.addEventListener('click', async (event) => {
+            console.log('Export button clicked, isTrusted:', event.isTrusted);
+            try {
+                // Disable the button to prevent multiple clicks
+                exportButton.disabled = true;
+                await prepareAndSaveExport();
+            } catch (error) {
+                console.error('Export failed:', error);
+                alert('Failed to export. Please try again.');
+            } finally {
+                exportButton.disabled = false;
+            }
+        });
     }
 
     const modal = new bootstrap.Modal(document.getElementById('exportFormatModal'));
     modal.show();
+}
+
+async function prepareAndSaveExport() {
+    // Show loading indicator
+    const loadingIndicator = document.createElement('div');
+    loadingIndicator.textContent = 'Preparing export...';
+    loadingIndicator.style.position = 'fixed';
+    loadingIndicator.style.top = '50%';
+    loadingIndicator.style.left = '50%';
+    loadingIndicator.style.transform = 'translate(-50%, -50%)';
+    loadingIndicator.style.background = 'rgba(0,0,0,0.7)';
+    loadingIndicator.style.color = 'white';
+    loadingIndicator.style.padding = '20px';
+    loadingIndicator.style.borderRadius = '5px';
+    document.body.appendChild(loadingIndicator);
+
+    try {
+        // Fetch records
+        const records = await getFilteredRecords();
+        if (records.length === 0) {
+            alert('No records to export!');
+            return;
+        }
+
+        // Prepare file content
+        const format = document.getElementById('exportFormat').value;
+        const columnElements = Array.from(document.getElementById('sortableColumns').children);
+
+        const selectedColumns = columnElements
+            .filter(el => el.querySelector('input[type="checkbox"]').checked)
+            .map(el => el.dataset.column);
+
+        if (selectedColumns.length === 0) {
+            alert('Please select at least one column to export!');
+            return;
+        }
+
+        const separator = format === 'tsv' ? '\t' : format === 'csv' ? ',' : ' | ';
+        const rows = [];
+        const headers = selectedColumns.map(col => {
+            switch (col) {
+                case 'name': return 'Full Name';
+                case 'phone_numbers': return 'Phone Numbers';
+                case 'validmail_results': return 'ValidMail Results';
+                default: return col.charAt(0).toUpperCase() + col.slice(1);
+            }
+        });
+        rows.push(headers.join(separator));
+
+        records.forEach(record => {
+            const row = selectedColumns.map(col => {
+                let value = record[col];
+                if (col === 'phone_numbers') {
+                    value = Array.isArray(value) ? value.join('; ') : value || 'N/A';
+                } else if (col === 'validmail_results') {
+                    value = value ? Object.entries(value)
+                        .map(([module, result]) => `${module}:${result ? 'Valid' : 'Invalid'}`)
+                        .join('; ') : 'N/A';
+                } else {
+                    value = value || 'N/A';
+                }
+                if (format === 'csv' && value.includes(',')) {
+                    value = `"${value.replace(/"/g, '""')}"`;
+                }
+                return value;
+            });
+            rows.push(row.join(separator));
+        });
+
+        const fileContent = rows.join('\n');
+        const fileType = format === 'csv' ? 'text/csv' : 'text/plain';
+
+        // Prompt user to confirm file save (new gesture)
+        const confirmSave = confirm('Export data is ready. Click OK to choose where to save the file.');
+        if (!confirmSave) {
+            alert('Export canceled.');
+            return;
+        }
+
+        // Save file in a new gesture context
+        try {
+            if ('showSaveFilePicker' in window) {
+                console.log('Calling showSaveFilePicker');
+                const fileHandle = await window.showSaveFilePicker({
+                    suggestedName: `exported_records.${format}`,
+                    types: [
+                        {
+                            description: `${format.toUpperCase()} File`,
+                            accept: { [fileType]: [`.${format}`] }
+                        }
+                    ]
+                });
+                const writableStream = await fileHandle.createWritable();
+                await writableStream.write(fileContent);
+                await writableStream.close();
+            } else {
+                throw new Error('showSaveFilePicker not supported');
+            }
+        } catch (error) {
+            if (error.name === 'SecurityError' || error.name === 'NotAllowedError' || error.message.includes('showSaveFilePicker')) {
+                console.warn('showSaveFilePicker failed, falling back to Blob download:', error);
+                // Fallback to Blob download
+                const blob = new Blob([fileContent], { type: fileType });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `exported_records.${format}`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } else if (error.name !== 'AbortError') {
+                throw error; // Rethrow unexpected errors
+            }
+        }
+
+        alert('File saved successfully!');
+        const modal = bootstrap.Modal.getInstance(document.getElementById('exportFormatModal'));
+        modal.hide();
+    } finally {
+        // Remove loading indicator
+        document.body.removeChild(loadingIndicator);
+    }
 }
 
 function initializeDragAndDrop() {

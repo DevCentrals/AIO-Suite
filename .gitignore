@@ -18,6 +18,7 @@ __pycache__/
 /Exclude/*
 #and the proxies
 proxies.txt
+import.py
 
 # Distribution / packaging
 .Python

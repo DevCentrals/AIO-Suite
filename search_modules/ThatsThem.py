@@ -111,7 +111,12 @@ class SearchAPIProcessor:
                 }
 
                 response = requests.post("http://api.capsolver.com/createTask", json=payload)
-                task_id = response.json().get("taskId")
+                response_data = response.json()
+
+                task_id = response_data.get("taskId")
+                if not task_id:
+                    print(f"Failed to get taskId from Capsolver response: {response_data}")
+                    raise Exception("No taskId returned from createTask")
 
                 while True:
                     task_result_payload = {"clientKey": self.capsolver_key, "taskId": task_id}
@@ -119,14 +124,15 @@ class SearchAPIProcessor:
 
                     if result_response.status_code == 403:
                         print("Received a 403 error. Check your API key, task ID, or possible IP blocking.")
-                        raise Exception
+                        raise Exception("403 Forbidden from getTaskResult")
 
                     if "ERROR_" in result_response.text:
                         print(f"Error from Capsolver: {result_response.text}")
-                        raise Exception
+                        raise Exception("Error from getTaskResult")
 
-                    if result_response.json().get("status") == "ready":
-                        return result_response.json().get("solution", {}).get("gRecaptchaResponse")
+                    result_data = result_response.json()
+                    if result_data.get("status") == "ready":
+                        return result_data.get("solution", {}).get("gRecaptchaResponse")
 
                     time.sleep(1)
             except Exception as e:

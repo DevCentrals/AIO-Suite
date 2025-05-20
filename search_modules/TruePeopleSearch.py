@@ -105,12 +105,12 @@ class SearchAPIProcessor:
         }
 
         url = f'https://www.truepeoplesearch.com/resultemail?email={corrected_email}'
-        response = session.get(url, headers=headers, impersonate="chrome133a")
+        response = session.get(url, headers=headers, impersonate="chrome136")
         if "Captcha Challenge" in response.text:
             htmlbase64 = base64.b64encode(response.text.encode()).decode()
             cf_clearance = self.get_captcha_solution(user_agent, self.proxy, url, htmlbase64)
             session.cookies.set("cf_clearance", cf_clearance)
-            response = session.get(url, headers=headers, impersonate="chrome133a")
+            response = session.get(url, headers=headers, impersonate="chrome136")
         
         if "internalcaptcha" in response.text or "Captcha" in response.text:
             print(f"Solving Internal Captcha")
@@ -153,7 +153,7 @@ class SearchAPIProcessor:
                 data=token,
             )
 
-            response = session.post('https://www.truepeoplesearch.com/internalcaptcha/captchasubmit',params=params,headers=headers, multipart=mp, allow_redirects=False, impersonate="chrome133a")
+            response = session.post('https://www.truepeoplesearch.com/internalcaptcha/captchasubmit',params=params,headers=headers, multipart=mp, allow_redirects=False, impersonate="chrome136")
             if "Invalid captcha" in response.text:
                 raise Exception("Turnstile Captcha Failed")
             #print(response.text)
@@ -173,7 +173,7 @@ class SearchAPIProcessor:
                 'user-agent': user_agent,
             }
             url = f'https://www.truepeoplesearch.com/resultemail?email={corrected_email}'
-            response = session.get(url, headers=headers, impersonate="chrome133a")
+            response = session.get(url, headers=headers, impersonate="chrome136")
             #print(response.text)
         if "Attention Required!" in response.text:
             raise Exception("Cloudflare Attack Protection")
@@ -203,7 +203,7 @@ class SearchAPIProcessor:
             'user-agent': user_agent,
         }
 
-        response = session.get(f'https://www.truepeoplesearch.com{data_detail_link}', headers=headers, impersonate="chrome133a")
+        response = session.get(f'https://www.truepeoplesearch.com{data_detail_link}', headers=headers, impersonate="chrome136")
         #print(response.text)
         soup = BeautifulSoup(response.text, 'html.parser')
 
