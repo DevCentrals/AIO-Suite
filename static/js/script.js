@@ -427,6 +427,8 @@ async function prepareAndSaveExport() {
 
         const separator = format === 'tsv' ? '\t' : format === 'csv' ? ',' : ' | ';
         const rows = [];
+        
+        // Prepare headers
         const headers = selectedColumns.map(col => {
             switch (col) {
                 case 'name': return 'Full Name';
@@ -437,21 +439,38 @@ async function prepareAndSaveExport() {
         });
         rows.push(headers.join(separator));
 
+        // Process each record
         records.forEach(record => {
             const row = selectedColumns.map(col => {
-                let value = record[col];
+                let value = record[col] || 'N/A';
+                
+                // Format specific fields
                 if (col === 'phone_numbers') {
-                    value = Array.isArray(value) ? value.join('; ') : value || 'N/A';
+                    value = Array.isArray(value) ? 
+                        value.join('; ').replace(/\r?\n|\r/g, ' ') : 
+                        value.toString().replace(/\r?\n|\r/g, ' ');
                 } else if (col === 'validmail_results') {
                     value = value ? Object.entries(value)
                         .map(([module, result]) => `${module}:${result ? 'Valid' : 'Invalid'}`)
                         .join('; ') : 'N/A';
-                } else {
-                    value = value || 'N/A';
                 }
-                if (format === 'csv' && value.includes(',')) {
-                    value = `"${value.replace(/"/g, '""')}"`;
+
+                // Clean up the value
+                value = value.toString()
+                    .replace(/\r?\n|\r/g, ' ')  // Replace newlines with spaces
+                    .replace(/\s+/g, ' ')        // Collapse multiple spaces
+                    .trim();                     // Trim whitespace
+
+                // Handle CSV escaping
+                if (format === 'csv') {
+                    if (value.includes('"')) {
+                        value = value.replace(/"/g, '""'); // Escape double quotes
+                    }
+                    if (value.includes(',')) {
+                        value = `"${value}"`; // Wrap in quotes if contains separator
+                    }
                 }
+
                 return value;
             });
             rows.push(row.join(separator));
@@ -459,54 +478,52 @@ async function prepareAndSaveExport() {
 
         const fileContent = rows.join('\n');
         const fileType = format === 'csv' ? 'text/csv' : 'text/plain';
+        const fileExtension = format === 'csv' ? 'csv' : format === 'tsv' ? 'tsv' : 'txt';
 
-        // Prompt user to confirm file save (new gesture)
-        const confirmSave = confirm('Export data is ready. Click OK to choose where to save the file.');
+        // Prompt user to confirm file save
+        const confirmSave = confirm(`Export data is ready (${records.length} records). Click OK to save as ${fileExtension.toUpperCase()} file.`);
         if (!confirmSave) {
             alert('Export canceled.');
             return;
         }
 
-        // Save file in a new gesture context
+        // Save file
         try {
             if ('showSaveFilePicker' in window) {
-                console.log('Calling showSaveFilePicker');
                 const fileHandle = await window.showSaveFilePicker({
-                    suggestedName: `exported_records.${format}`,
-                    types: [
-                        {
-                            description: `${format.toUpperCase()} File`,
-                            accept: { [fileType]: [`.${format}`] }
-                        }
-                    ]
+                    suggestedName: `export_${new Date().toISOString().slice(0,10)}.${fileExtension}`,
+                    types: [{
+                        description: `${fileExtension.toUpperCase()} File`,
+                        accept: { [fileType]: [`.${fileExtension}`] }
+                    }]
                 });
                 const writableStream = await fileHandle.createWritable();
                 await writableStream.write(fileContent);
                 await writableStream.close();
             } else {
-                throw new Error('showSaveFilePicker not supported');
-            }
-        } catch (error) {
-            if (error.name === 'SecurityError' || error.name === 'NotAllowedError' || error.message.includes('showSaveFilePicker')) {
-                console.warn('showSaveFilePicker failed, falling back to Blob download:', error);
-                // Fallback to Blob download
-                const blob = new Blob([fileContent], { type: fileType });
+                // Fallback for browsers without File System Access API
+                const blob = new Blob([fileContent], { type: `${fileType};charset=utf-8;` });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `exported_records.${format}`;
+                a.download = `export_${new Date().toISOString().slice(0,10)}.${fileExtension}`;
                 document.body.appendChild(a);
                 a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-            } else if (error.name !== 'AbortError') {
-                throw error; // Rethrow unexpected errors
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
+            }
+
+            alert(`File saved successfully with ${records.length} records!`);
+            const modal = bootstrap.Modal.getInstance(document.getElementById('exportFormatModal'));
+            modal.hide();
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                console.error('Error saving file:', error);
+                alert('Failed to save the file. Please try again.');
             }
         }
-
-        alert('File saved successfully!');
-        const modal = bootstrap.Modal.getInstance(document.getElementById('exportFormatModal'));
-        modal.hide();
     } finally {
         // Remove loading indicator
         document.body.removeChild(loadingIndicator);
@@ -569,9 +586,17 @@ function initializeDragAndDrop() {
 }
 
 async function executeExport() {
+    // Fetch records
+    const records = await getFilteredRecords();
+    if (records.length === 0) {
+        alert('No records to export!');
+        return;
+    }
+
+    // Get export settings
     const format = document.getElementById('exportFormat').value;
     const columnElements = Array.from(document.getElementById('sortableColumns').children);
-    
+
     const selectedColumns = columnElements
         .filter(el => el.querySelector('input[type="checkbox"]').checked)
         .map(el => el.dataset.column);
@@ -581,15 +606,10 @@ async function executeExport() {
         return;
     }
 
-    const records = await getFilteredRecords();
-    if (records.length === 0) {
-        alert('No records to export!');
-        return;
-    }
-
     const separator = format === 'tsv' ? '\t' : format === 'csv' ? ',' : ' | ';
-    
     const rows = [];
+    
+    // Prepare headers
     const headers = selectedColumns.map(col => {
         switch (col) {
             case 'name': return 'Full Name';
@@ -600,22 +620,36 @@ async function executeExport() {
     });
     rows.push(headers.join(separator));
 
+    // Process each record
     records.forEach(record => {
         const row = selectedColumns.map(col => {
-            let value = record[col];
+            let value = record[col] || 'N/A';
             
+            // Format specific fields
             if (col === 'phone_numbers') {
-                value = Array.isArray(value) ? value.join('; ') : value || 'N/A';
+                value = Array.isArray(value) ? 
+                    value.join('; ').replace(/\r?\n|\r/g, ' ') : 
+                    value.toString().replace(/\r?\n|\r/g, ' ');
             } else if (col === 'validmail_results') {
                 value = value ? Object.entries(value)
                     .map(([module, result]) => `${module}:${result ? 'Valid' : 'Invalid'}`)
                     .join('; ') : 'N/A';
-            } else {
-                value = value || 'N/A';
             }
 
-            if (format === 'csv' && value.includes(',')) {
-                value = `"${value.replace(/"/g, '""')}"`;
+            // Clean up the value
+            value = value.toString()
+                .replace(/\r?\n|\r/g, ' ')  // Replace newlines with spaces
+                .replace(/\s+/g, ' ')        // Collapse multiple spaces
+                .trim();                     // Trim whitespace
+
+            // Handle CSV escaping
+            if (format === 'csv') {
+                if (value.includes('"')) {
+                    value = value.replace(/"/g, '""'); // Escape double quotes
+                }
+                if (value.includes(',')) {
+                    value = `"${value}"`; // Wrap in quotes if contains separator
+                }
             }
 
             return value;
@@ -625,37 +659,37 @@ async function executeExport() {
 
     const fileContent = rows.join('\n');
     const fileType = format === 'csv' ? 'text/csv' : 'text/plain';
+    const fileExtension = format === 'csv' ? 'csv' : format === 'tsv' ? 'tsv' : 'txt';
 
+    // Save file
     try {
         if ('showSaveFilePicker' in window) {
             const fileHandle = await window.showSaveFilePicker({
-                suggestedName: `exported_records.${format}`,
-                types: [
-                    {
-                        description: `${format.toUpperCase()} File`,
-                        accept: { [fileType]: [`.${format}`] }
-                    }
-                ]
+                suggestedName: `export_${new Date().toISOString().slice(0,10)}.${fileExtension}`,
+                types: [{
+                    description: `${fileExtension.toUpperCase()} File`,
+                    accept: { [fileType]: [`.${fileExtension}`] }
+                }]
             });
-
             const writableStream = await fileHandle.createWritable();
             await writableStream.write(fileContent);
             await writableStream.close();
-
-            alert('File saved successfully!');
         } else {
-            const blob = new Blob([fileContent], { type: fileType });
+            // Fallback for browsers without File System Access API
+            const blob = new Blob([fileContent], { type: `${fileType};charset=utf-8;` });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `exported_records.${format}`;
+            a.download = `export_${new Date().toISOString().slice(0,10)}.${fileExtension}`;
             document.body.appendChild(a);
             a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-
-            alert('File saved successfully!');
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 100);
         }
+
+        alert(`Exported ${records.length} records successfully!`);
     } catch (error) {
         if (error.name !== 'AbortError') {
             console.error('Error saving file:', error);
@@ -663,6 +697,7 @@ async function executeExport() {
         }
     }
 
+    // Close modal
     const modal = bootstrap.Modal.getInstance(document.getElementById('exportFormatModal'));
     modal.hide();
 }

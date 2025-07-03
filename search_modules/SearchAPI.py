@@ -15,7 +15,7 @@ class SearchAPIProcessor:
         if not api_key:
             raise ValueError("Search API key not found in settings")
 
-        url = f'https://search-api.dev/search.php?email={email}&api_key={api_key}'
+        url = f'https://search-api.dev/search.php?email={email}&api_key={api_key}&extra_info=True'
         
         headers = {
             'Accept': 'application/json',
@@ -35,14 +35,15 @@ class SearchAPIProcessor:
                 return None
                 
             data = response.json()
-            
+            #print(data)
             result = {
                 'email': data.get("email", ""),
                 'name': data.get("name", ""),
                 'phone_numbers': data.get("numbers", []),
-                'address': data.get("address", ""),
+                'address': data.get("addresses", [""])[0] if isinstance(data.get("addresses", None), list) and data.get("addresses") else data.get("addresses", ""),
                 'dob': data.get("dob", ""),
             }
+            #print(result)
             
             return result
 
