@@ -1123,11 +1123,8 @@ async function performRecoveryCheck() {
 }
 
 function getAllMatchingEmails(fetchAll = true) {
-    const filters = {
-        domain: document.getElementById('filter-domain').value,
-        status: statusFilter.value
-    };
-    const url = `/get_emails?filters=${JSON.stringify(filters)}&fetch_all=${fetchAll}`;
+    const filters = currentFilters || {};
+    const url = `/get_emails?filters=${encodeURIComponent(JSON.stringify(filters))}&fetch_all=${fetchAll}`;
 
     return fetch(url)
         .then(response => response.json())
