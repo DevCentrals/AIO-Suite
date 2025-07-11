@@ -128,6 +128,11 @@ def convert_to_american_format(phone_number: str) -> str:
         return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
     return phone_number
 
+def get_first_string(val):
+    if isinstance(val, list):
+        return val[0] if val else ""
+    return val if val is not None else ""
+
 @app.route('/')
 @login_required
 def index():
@@ -413,9 +418,9 @@ def perform_lookup():
                 if result:
                     lookup_results.append(result)
                     email.update_info(
-                        name=result.get('name', ""),
-                        address=result.get('address', ""),
-                        dob=result.get('dob', "")
+                        name=get_first_string(result.get('name', "")),
+                        address=get_first_string(result.get('address', "")),
+                        dob=get_first_string(result.get('dob', ""))
                     )
                     email.update_autodoxed(result.get('phone_numbers', []))
                 email.status = "Searched"
