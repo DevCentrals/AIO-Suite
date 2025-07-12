@@ -153,7 +153,7 @@ class SearchAPIProcessor:
         details['address'] = details['address'].replace('  ', ' ')
         return details
 
-    async def search(self, email: str, settings: Dict[str, str], proxy: Optional[str] = None) -> Optional[Dict]:
+    def search(self, email: str, settings: Dict[str, str], proxy: Optional[str] = None) -> Optional[Dict]:
         try:
             leakosint_key = settings.get('leakosint_key')
             if not leakosint_key:

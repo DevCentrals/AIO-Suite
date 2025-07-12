@@ -49,7 +49,7 @@ class SearchAPIProcessor:
     def clean_text(self, text):
         return re.sub(r'\s+', ' ', text.strip())
     
-    async def search(self, email: str, settings: Dict[str, str], proxy: str) -> Optional[Dict]:
+    def search(self, email: str, settings: Dict[str, str], proxy: str) -> Optional[Dict]:
         print(f"Processing {email} with TruePeopleSearch")
         self.proxy = proxy
         self.CAPMON_KEY = settings.get('capmonster_key')

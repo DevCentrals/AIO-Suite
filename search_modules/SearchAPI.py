@@ -9,7 +9,7 @@ class SearchAPIProcessor:
     def required_settings() -> List[str]:
         return ['search_api_key']
 
-    async def search(self, email: str, settings: Dict[str, str], proxy: str) -> Optional[Dict]:
+    def search(self, email: str, settings: Dict[str, str], proxy: str) -> Optional[Dict]:
         print(f"Processing {email} with SearchAPI")
         api_key = settings.get('search_api_key')
         if not api_key:
@@ -36,16 +36,37 @@ class SearchAPIProcessor:
                 
             data = response.json()
             #print(data)
+            
+            addresses = data.get("addresses", [])
+            address = ""
+            if isinstance(addresses, list) and addresses:
+                for addr in addresses:
+                    if addr and addr.strip():
+                        address = addr.strip()
+                        break
+            elif isinstance(addresses, str) and addresses.strip():
+                address = addresses.strip()
+            
             result = {
                 'email': data.get("email", ""),
                 'name': data.get("name", ""),
                 'phone_numbers': data.get("numbers", []),
-                'address': data.get("addresses", [""])[0] if isinstance(data.get("addresses", None), list) and data.get("addresses") else data.get("addresses", ""),
+                'address': address,
                 'dob': data.get("dob", ""),
             }
             #print(result)
             
-            return result
+            has_data = any([
+                result['name'],
+                result['address'],
+                result['dob'],
+                result['phone_numbers']
+            ])
+            
+            if has_data:
+                return result
+            else:
+                return None
 
         except requests.exceptions.RequestException as e:
             print(f"Error fetching details for {email}: {str(e)}")

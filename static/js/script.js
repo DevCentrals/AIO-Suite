@@ -369,12 +369,9 @@ async function showExportFormatModal() {
         document.body.insertAdjacentHTML('beforeend', modalHTML);
         initializeDragAndDrop();
 
-        // Attach event listener to the Export button
         const exportButton = document.getElementById('exportButton');
         exportButton.addEventListener('click', async (event) => {
-            console.log('Export button clicked, isTrusted:', event.isTrusted);
             try {
-                // Disable the button to prevent multiple clicks
                 exportButton.disabled = true;
                 await prepareAndSaveExport();
             } catch (error) {
@@ -407,6 +404,7 @@ async function prepareAndSaveExport() {
     try {
         // Fetch records
         const records = await getFilteredRecords();
+        
         if (records.length === 0) {
             alert('No records to export!');
             return;
@@ -440,7 +438,7 @@ async function prepareAndSaveExport() {
         rows.push(headers.join(separator));
 
         // Process each record
-        records.forEach(record => {
+        records.forEach((record, index) => {
             const row = selectedColumns.map(col => {
                 let value = record[col] || 'N/A';
                 
@@ -709,8 +707,11 @@ async function getFilteredRecords() {
     };
 
     try {
-        const response = await fetch(`/get_emails?filters=${JSON.stringify(filters)}&fetch_all=true`);
+        const url = `/get_emails?filters=${JSON.stringify(filters)}&fetch_all=true`;
+        
+        const response = await fetch(url);
         const data = await response.json();
+        
         return data.records || [];
     } catch (error) {
         console.error('Error fetching filtered records:', error);
@@ -828,7 +829,6 @@ async function performLookup() {
 
     showOverlay("Loading, please wait...");
     const selectedEmails = executeAll ? await getAllMatchingEmails() : getSelectedEmails();
-    console.log(selectedEmails);
     initializeStats(selectedEmails.length);
 
     if (selectedEmails.length === 0) {
@@ -1128,7 +1128,10 @@ function getAllMatchingEmails(fetchAll = true) {
 
     return fetch(url)
         .then(response => response.json())
-        .then(data => data.records.map(record => record.email))
+        .then(data => {
+            const emails = data.records.map(record => record.email);
+            return emails;
+        })
         .catch(error => {
             console.error('Error fetching matching emails:', error);
             return [];
@@ -1178,6 +1181,13 @@ document.addEventListener('DOMContentLoaded', () => {
             initializeStats(data.total);
         }
         updateProgress(data.status);
+        
+        // Close overlay when task is completed
+        if (data.status && (data.status.includes('completed') || data.status.includes('finished'))) {
+            setTimeout(() => {
+                closeOverlay();
+            }, 1000);
+        }
     });
 
     socket.on('email_result', function(result) {
@@ -1216,6 +1226,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         } else {
             console.warn(`No row found for email: ${result.email}`);
+        }
+        
+        if (completedTasks >= totalTasks && totalTasks > 0) {
+            setTimeout(() => {
+                closeOverlay();
+            }, 1000);
         }
     });
 

@@ -12,7 +12,7 @@ class SearchAPIProcessor:
     def required_settings() -> List[str]:
         return ['capsolver_key']
 
-    async def search(self, email: str, settings: Dict[str, str], proxy: str) -> Optional[Dict]:
+    def search(self, email: str, settings: Dict[str, str], proxy: str) -> Optional[Dict]:
         print(f"Processing {email} with ThatsThem")
         self.proxy = proxy
         self.capsolver_key = settings.get('capsolver_key')

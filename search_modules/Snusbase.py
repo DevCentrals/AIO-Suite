@@ -11,7 +11,7 @@ class SearchAPIProcessor:
     def required_settings() -> List[str]:
         return ['snusbase_api_key']
 
-    async def search(self, email: str, settings: Dict[str, str], proxy: str) -> Optional[Dict]:
+    def search(self, email: str, settings: Dict[str, str], proxy: str) -> Optional[Dict]:
         try:
             session = requests.Session()
             api_key = settings.get('snusbase_api_key')

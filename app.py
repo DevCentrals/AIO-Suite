@@ -93,7 +93,7 @@ class SearchProcessor:
         self.search_modules = ModuleLoader.load_modules('search_modules')
         self.required_settings = ModuleLoader.get_required_settings(self.search_modules)
         
-    async def process_email(self, email: str, module_name: str, settings: Dict[str, str], proxies: List[str]) -> ModuleResult:
+    def process_email(self, email: str, module_name: str, settings: Dict[str, str], proxies: List[str]) -> ModuleResult:
         if module_name not in self.search_modules:
             return ModuleResult(success=False, error=f"Module {module_name} not found")
             
@@ -106,17 +106,19 @@ class SearchProcessor:
         for attempt in range(MAX_RETRIES):
             try:
                 proxy = get_proxy(proxies)
-                result = await processor.search(email, settings, proxy)
+                result = processor.search(email, settings, proxy)
                 
                 if result is not None:
                     return ModuleResult(success=True, data=result)
                 
-                return ModuleResult(success=False, error="No results found")
+                # No results found is not a failure, it's a valid outcome
+                return ModuleResult(success=True, data=None, error="No results found")
             
             except Exception as e:
                 if attempt == MAX_RETRIES - 1:
                     return ModuleResult(success=False, error=str(e))
-                await asyncio.sleep(RETRY_DELAY_SECONDS)
+                import time
+                time.sleep(RETRY_DELAY_SECONDS)
                 
         return ModuleResult(success=False, error="Max retries reached")
 
@@ -130,8 +132,15 @@ def convert_to_american_format(phone_number: str) -> str:
 
 def get_first_string(val):
     if isinstance(val, list):
-        return val[0] if val else ""
-    return val if val is not None else ""
+        # Find the first non-empty string in the list
+        for item in val:
+            if item and str(item).strip():
+                return str(item).strip()
+        return ""
+    elif val is None:
+        return ""
+    else:
+        return str(val).strip()
 
 @app.route('/')
 @login_required
@@ -398,35 +407,97 @@ def perform_lookup():
             'total': len(emails_to_lookup)
         })
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent_tasks) as executor:
-            futures = {}
-            for email in emails_to_lookup:
-                email_record = db.session.query(Email).filter_by(email=email).first()
-                if email_record:
-                    futures[executor.submit(
-                        process_email_for_lookup,
-                        current_app._get_current_object(),
-                        email_record.email,
-                        proxies,
-                        settings,
-                        selected_modules
-                    )] = email_record
+        processed_count = 0
+        skipped_count = 0
+        error_count = 0
+        
+        # Process emails in smaller batches to avoid overwhelming the system
+        batch_size = 100
+        total_emails = len(emails_to_lookup)
+        
+        for batch_start in range(0, total_emails, batch_size):
+            batch_end = min(batch_start + batch_size, total_emails)
+            batch_emails = emails_to_lookup[batch_start:batch_end]
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent_tasks) as executor:
+                futures = {}
+                for email in batch_emails:
+                    email_record = db.session.query(Email).filter_by(email=email).first()
+                    if email_record:
+                        futures[executor.submit(
+                            process_email_for_lookup,
+                            current_app._get_current_object(),
+                            email_record.email,
+                            proxies,
+                            settings,
+                            selected_modules
+                        )] = email_record
+                        processed_count += 1
+                    else:
+                        print(f"Warning: Email {email} not found in database, skipping...")
+                        skipped_count += 1
+                        # Emit a result for emails not found in database
+                        socketio.emit('email_result', {
+                            'email': email,
+                            'name': 'N/A',
+                            'address': 'N/A',
+                            'dob': 'N/A',
+                            'phone_numbers': [],
+                            'validmail_results': {},
+                            'status': 'Not Found',
+                            'success': False,
+                            'processed_modules': []
+                        })
 
-            for future in concurrent.futures.as_completed(futures):
-                result = future.result()
-                email = futures[future]
-                if result:
-                    lookup_results.append(result)
-                    email.update_info(
-                        name=get_first_string(result.get('name', "")),
-                        address=get_first_string(result.get('address', "")),
-                        dob=get_first_string(result.get('dob', ""))
-                    )
-                    email.update_autodoxed(result.get('phone_numbers', []))
-                email.status = "Searched"
-                db.session.commit()
+                try:
+                    for future in concurrent.futures.as_completed(futures, timeout=300):
+                        try:
+                            result = future.result(timeout=60)
+                            email = futures[future]
+                            if result:
+                                lookup_results.append(result)
+                            else:
+                                pass
+                        except concurrent.futures.TimeoutError:
+                            error_count += 1
+                        except Exception as e:
+                            error_count += 1
+                except concurrent.futures.TimeoutError:
+                    error_count += len(futures)
 
         socketio.emit('task_status', {'status': 'Task completed, check results.'})
+        
+        status_batch_size = 500
+        for status_batch_start in range(0, len(emails_to_lookup), status_batch_size):
+            status_batch_end = min(status_batch_start + status_batch_size, len(emails_to_lookup))
+            status_batch_emails = emails_to_lookup[status_batch_start:status_batch_end]
+            
+            with app.app_context():
+                for email in status_batch_emails:
+                    try:
+                        email_record = db.session.query(Email).filter_by(email=email).first()
+                        if email_record and email_record.status == "pending":
+                            email_record.status = "Searched"
+                        elif email_record:
+                            pass
+                        else:
+                            pass
+                    except Exception as e:
+                        pass
+                
+                try:
+                    db.session.commit()
+                except Exception as e:
+                    db.session.rollback()
+        
+        try:
+            pending_count = db.session.query(Email).filter_by(status="pending").count()
+            total_count = db.session.query(Email).count()
+            if pending_count > 0:
+                print(f"WARNING - {pending_count} emails are still pending!")
+        except Exception as e:
+            pass
+        
         return jsonify({'success': True, 'results': lookup_results})
         
     except Exception as e:
@@ -435,59 +506,131 @@ def perform_lookup():
 
 def process_email_for_lookup(app, email: str, proxies: List[str], settings: Dict[str, str], selected_modules) -> Optional[Dict[str, Any]]:
     with app.app_context():
-        search_processor = SearchProcessor()
-        
-        results = []
-        for module_name in selected_modules:
-            module_settings = {
-                key: settings.get(key)
-                for key in search_processor.required_settings.get(module_name, [])
+        try:
+            search_processor = SearchProcessor()
+            
+            results = []
+            for module_name in selected_modules:
+                try:
+                    module_settings = {
+                        key: settings.get(key)
+                        for key in search_processor.required_settings.get(module_name, [])
+                    }
+                    
+                    result = search_processor.process_email(email, module_name, module_settings, proxies)
+                    if result.success:
+                        if result.data:
+                            has_data = any([
+                                result.data.get('name'),
+                                result.data.get('address'),
+                                result.data.get('dob'),
+                                result.data.get('phone_numbers')
+                            ])
+                            if has_data:
+                                results.append(result.data)
+                            else:
+                                print(f"Module {module_name} returned empty data for {email}")
+                        else:
+                            # Module ran successfully but found no results
+                            print(f"Module {module_name} found no results for {email}")
+                    else:
+                        print(f"Module {module_name} failed for {email}: {result.error if result else 'No result'}")
+                except Exception as e:
+                    print(f"Error processing {email} with module {module_name}: {e}")
+                    continue
+            
+            merged_result = {}
+            if results:
+                merged_result = results[0].copy()
+                for result in results[1:]:
+                    for key, value in result.items():
+                        if key not in merged_result or not merged_result[key]:
+                            merged_result[key] = value
+                        elif isinstance(value, list) and key == 'phone_numbers':
+                            merged_result[key] = list(set(merged_result[key] + value))
+                        elif isinstance(value, str) and isinstance(merged_result[key], str):
+                            if value and not merged_result[key]:
+                                merged_result[key] = value
+                
+                for field in ['name', 'address', 'dob']:
+                    if field in merged_result:
+                        if isinstance(merged_result[field], list):
+                            for item in merged_result[field]:
+                                if item and str(item).strip():
+                                    merged_result[field] = str(item).strip()
+                                    break
+                            else:
+                                merged_result[field] = ""
+                        elif merged_result[field] is None:
+                            merged_result[field] = ""
+                        else:
+                            merged_result[field] = str(merged_result[field]).strip()
+                
+                if 'phone_numbers' in merged_result:
+                    merged_result['phone_numbers'] = [
+                        convert_to_american_format(num) 
+                        for num in merged_result['phone_numbers']
+                    ]
+            
+            # Save results to database
+            email_record = db.session.query(Email).filter_by(email=email).first()
+            if email_record:
+                try:
+                    # Update the email record with the found data
+                    if merged_result.get('name'):
+                        email_record.name = merged_result['name']
+                    if merged_result.get('address'):
+                        email_record.address = merged_result['address']
+                    if merged_result.get('dob'):
+                        email_record.dob = merged_result['dob']
+                    if merged_result.get('phone_numbers'):
+                        email_record.phone_numbers = "; ".join(merged_result['phone_numbers'])
+                    
+                    email_record.status = "Searched"
+                    db.session.commit()
+                except Exception as e:
+                    print(f"Error saving to database for {email}: {e}")
+                    db.session.rollback()
+            
+            validmail_results = email_record.validmail_results if email_record else {}
+            if isinstance(validmail_results, str):
+                try:
+                    validmail_results = json.loads(validmail_results)
+                except json.JSONDecodeError:
+                    validmail_results = {}
+            
+            result_to_emit = {
+                'email': email,
+                'name': merged_result.get('name', email_record.name if email_record else 'N/A'),
+                'address': merged_result.get('address', email_record.address if email_record else 'N/A'),
+                'dob': merged_result.get('dob', email_record.dob if email_record else 'N/A'),
+                'phone_numbers': merged_result.get('phone_numbers', []),
+                'validmail_results': validmail_results,
+                'status': 'Searched',
+                'success': bool(results),
+                'processed_modules': selected_modules
             }
             
-            result = asyncio.run(search_processor.process_email(email, module_name, module_settings, proxies))
-            if result.success and result.data:
-                results.append(result.data)
-        
-        merged_result = {}
-        if results:
-            merged_result = results[0].copy()
-            for result in results[1:]:
-                for key, value in result.items():
-                    if key not in merged_result or not merged_result[key]:
-                        merged_result[key] = value
-                    elif isinstance(value, list):
-                        merged_result[key] = list(set(merged_result[key] + value))
+            socketio.emit('email_result', result_to_emit)
             
-            if 'phone_numbers' in merged_result:
-                merged_result['phone_numbers'] = [
-                    convert_to_american_format(num) 
-                    for num in merged_result['phone_numbers']
-                ]
-        
-        email_record = db.session.query(Email).filter_by(email=email).first()
-        
-        validmail_results = email_record.validmail_results if email_record else {}
-        if isinstance(validmail_results, str):
-            try:
-                validmail_results = json.loads(validmail_results)
-            except json.JSONDecodeError:
-                validmail_results = {}
-        
-        result_to_emit = {
-            'email': email,
-            'name': merged_result.get('name', email_record.name if email_record else 'N/A'),
-            'address': merged_result.get('address', email_record.address if email_record else 'N/A'),
-            'dob': merged_result.get('dob', email_record.dob if email_record else 'N/A'),
-            'phone_numbers': merged_result.get('phone_numbers', []),
-            'validmail_results': validmail_results,
-            'status': 'Searched',
-            'success': bool(results),
-            'processed_modules': selected_modules
-        }
-        
-        socketio.emit('email_result', result_to_emit)
-        
-        return merged_result if results else None
+            return merged_result if results else None
+            
+        except Exception as e:
+            print(f"Critical error processing {email}: {e}")
+            # Emit error result
+            socketio.emit('email_result', {
+                'email': email,
+                'name': 'N/A',
+                'address': 'N/A',
+                'dob': 'N/A',
+                'phone_numbers': [],
+                'validmail_results': {},
+                'status': 'Error',
+                'success': False,
+                'processed_modules': [],
+                'error': str(e)
+            })
+            return None
 
 @app.route('/get_emails')
 @login_required
@@ -505,7 +648,6 @@ def get_emails():
         query = query.filter(Email.status == filters['status'])
     if filters.get('module_results'):
         for module_name, is_valid in filters['module_results'].items():
-            print(f"Filtering by module: {module_name}, Valid: {is_valid}")
             query = query.filter(
                 func.json_extract(Email.validmail_results, f'$.{module_name}').cast(db.Boolean) == (True if is_valid else False)
             )
@@ -552,11 +694,13 @@ def get_emails():
     statuses = db.session.query(Email.status).distinct().all()
     status_list = [status[0] for status in statuses]
 
-    return jsonify({
+    result = {
         'records': [record.to_dict() for record in records],
         'total': total,
         'statuses': status_list
-    })
+    }
+    
+    return jsonify(result)
 
 @app.route('/delete_records', methods=['POST'])
 @login_required
