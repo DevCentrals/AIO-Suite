@@ -412,7 +412,7 @@ def perform_lookup():
         error_count = 0
         
         # Process emails in smaller batches to avoid overwhelming the system
-        batch_size = 100
+        batch_size = 500
         total_emails = len(emails_to_lookup)
         
         for batch_start in range(0, total_emails, batch_size):
@@ -467,7 +467,7 @@ def perform_lookup():
 
         socketio.emit('task_status', {'status': 'Task completed, check results.'})
         
-        status_batch_size = 500
+        status_batch_size = 1500
         for status_batch_start in range(0, len(emails_to_lookup), status_batch_size):
             status_batch_end = min(status_batch_start + status_batch_size, len(emails_to_lookup))
             status_batch_emails = emails_to_lookup[status_batch_start:status_batch_end]
@@ -646,12 +646,6 @@ def get_emails():
         query = query.filter(Email.domain.ilike(f"%{filters['domain']}%"))
     if filters.get('status'):
         query = query.filter(Email.status == filters['status'])
-    if filters.get('module_results'):
-        for module_name, is_valid in filters['module_results'].items():
-            query = query.filter(
-                func.json_extract(Email.validmail_results, f'$.{module_name}').cast(db.Boolean) == (True if is_valid else False)
-            )
-
     if filters.get('has_name'):
         query = query.filter(Email.name != None, Email.name != '', Email.name != 'N/A')
     if filters.get('has_phone'):
@@ -663,7 +657,14 @@ def get_emails():
 
     if filters.get('vm_status'):
         vm_status = filters['vm_status']
-        if vm_status == 'valid':
+        if vm_status == 'not-checked':
+            # Emails that haven't been VM checked (no validmail_results or empty)
+            query = query.filter(
+                (Email.validmail_results == None) | 
+                (Email.validmail_results == '') |
+                (func.json_extract(Email.validmail_results, '$') == '{}')
+            )
+        elif vm_status == 'valid':
             query = query.filter(Email.validmail_results != None)
             query = query.filter(
                 func.json_extract(Email.validmail_results, '$') != '{}'
@@ -683,6 +684,20 @@ def get_emails():
             query = query.filter(
                 func.json_extract(Email.validmail_results, '$') != '{}'
             )
+
+    # Filter by specific VM module results (consolidated from both module_results and vm_module_results)
+    module_results = {}
+    if filters.get('module_results'):
+        module_results.update(filters['module_results'])
+    if filters.get('vm_module_results'):
+        module_results.update(filters['vm_module_results'])
+    
+    if module_results:
+        for module_name, is_valid in module_results.items():
+            if is_valid is not None:  # Only apply filter if value is explicitly set
+                query = query.filter(
+                    func.json_extract(Email.validmail_results, f'$.{module_name}').cast(db.Boolean) == (True if is_valid else False)
+                )
 
     total = query.count()
 
@@ -726,11 +741,19 @@ def delete_records():
                 query = query.filter(Email.domain.ilike(f"%{filters['domain']}%"))
             if filters.get('status'):
                 query = query.filter(Email.status == filters['status'])
+            # Filter by specific VM module results (consolidated from both module_results and vm_module_results)
+            module_results = {}
             if filters.get('module_results'):
-                for module_name, is_valid in filters['module_results'].items():
-                    query = query.filter(
-                        func.json_extract(Email.validmail_results, f'$.{module_name}').cast(db.Boolean) == (True if is_valid else False)
-                    )
+                module_results.update(filters['module_results'])
+            if filters.get('vm_module_results'):
+                module_results.update(filters['vm_module_results'])
+            
+            if module_results:
+                for module_name, is_valid in module_results.items():
+                    if is_valid is not None:  # Only apply filter if value is explicitly set
+                        query = query.filter(
+                            func.json_extract(Email.validmail_results, f'$.{module_name}').cast(db.Boolean) == (True if is_valid else False)
+                        )
                     
             result = query.delete(synchronize_session='fetch')
             

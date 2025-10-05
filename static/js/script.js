@@ -262,7 +262,10 @@ async function fetchRecords(page = 1, filters = currentFilters) {
         totalRecordsElem.textContent = `Total Records: ${totalRecords}`;
         updatePagination();
         populateStatusOptions(data.statuses);
-        populateModuleFilter();
+        // Only populate module filters if elements exist
+        if (document.getElementById('module-filter') && document.getElementById('vm-module-filter')) {
+            populateModuleFilter();
+        }
         statusFilter.value = filters.status || "";
 
     } catch (error) {
@@ -883,6 +886,8 @@ function resetFilters() {
   
   document.getElementById('vm-status').value = '';
   document.getElementById('module-filter').selectedIndex = -1;
+  document.getElementById('vm-module-filter').selectedIndex = -1;
+  document.getElementById('vm-module-status').value = '';
   
   currentFilters = {};
   fetchRecords(1);
@@ -890,6 +895,13 @@ function resetFilters() {
 
 function applyFilters() {
     currentFilters = {};
+    
+    // Ensure module filters are populated if they don't exist yet
+    const moduleFilter = document.getElementById('module-filter');
+    const vmModuleFilter = document.getElementById('vm-module-filter');
+    if ((moduleFilter && moduleFilter.children.length === 0) || (vmModuleFilter && vmModuleFilter.children.length === 0)) {
+        populateModuleFilter();
+    }
     
     const domain = document.getElementById('filter-domain').value;
     const status = document.getElementById('status-filter').value;
@@ -915,17 +927,39 @@ function applyFilters() {
       currentFilters.vm_status = vmStatus;
     }
     
-    const selectedModules = Array.from(document.getElementById('module-filter').selectedOptions)
-      .map(option => option.value);
+    // Handle module filtering (only if element exists)
+    if (moduleFilter) {
+      const selectedModules = Array.from(moduleFilter.selectedOptions)
+        .map(option => option.value);
+      
+      if (selectedModules.length > 0) {
+        currentFilters.module_results = {};
+        selectedModules.forEach(module => {
+          currentFilters.module_results[module] = true; // Default to valid
+        });
+      }
+    }
     
-    if (selectedModules.length > 0) {
-      currentFilters.module_results = {};
-      selectedModules.forEach(module => {
-        currentFilters.module_results[module] = true; // Default to valid
-      });
+    // Handle VM module specific filtering (only if elements exist)
+    const vmModuleStatusElement = document.getElementById('vm-module-status');
+    
+    if (vmModuleFilter && vmModuleStatusElement) {
+      const selectedVmModules = Array.from(vmModuleFilter.selectedOptions)
+        .map(option => option.value);
+      const vmModuleStatus = vmModuleStatusElement.value;
+      
+      if (selectedVmModules.length > 0 && vmModuleStatus) {
+        currentFilters.vm_module_results = {};
+        selectedVmModules.forEach(module => {
+          currentFilters.vm_module_results[module] = vmModuleStatus === 'valid';
+        });
+      }
     }
     
     const filtersParam = encodeURIComponent(JSON.stringify(currentFilters));
+    
+    console.log('Applied filters:', currentFilters);
+    console.log('Filters param:', filtersParam);
     
     fetch(`/get_emails?page=1&records_per_page=${recordsPerPage}&filters=${filtersParam}`)
       .then(response => response.json())
@@ -954,7 +988,10 @@ function applyFilters() {
         totalRecordsElem.textContent = `Total Records: ${totalRecords}`;
         updatePagination();
         populateStatusOptions(data.statuses);
-        populateModuleFilter();
+        // Only populate module filters if elements exist
+        if (document.getElementById('module-filter') && document.getElementById('vm-module-filter')) {
+            populateModuleFilter();
+        }
       })
       .catch(error => {
         console.error('Error fetching filtered records:', error);
@@ -1067,15 +1104,33 @@ async function populateModuleFilter() {
         const response = await fetch('/get_modules');
         const data = await response.json();
         const moduleFilter = document.getElementById('module-filter');
+        const vmModuleFilter = document.getElementById('vm-module-filter');
 
-        moduleFilter.innerHTML = '';
+        if (moduleFilter) {
+            moduleFilter.innerHTML = '';
+        }
+        if (vmModuleFilter) {
+            vmModuleFilter.innerHTML = '';
+        }
 
-        data.validmail_modules.forEach(module => {
-            const option = document.createElement('option');
-            option.value = module.module_name;
-            option.textContent = module.name;
-            moduleFilter.appendChild(option);
-        });
+        if (data.validmail_modules) {
+            data.validmail_modules.forEach(module => {
+                if (moduleFilter) {
+                    const option = document.createElement('option');
+                    option.value = module.module_name;
+                    option.textContent = module.name;
+                    moduleFilter.appendChild(option);
+                }
+                
+                // Also add to VM module filter
+                if (vmModuleFilter) {
+                    const vmOption = document.createElement('option');
+                    vmOption.value = module.module_name;
+                    vmOption.textContent = module.name;
+                    vmModuleFilter.appendChild(vmOption);
+                }
+            });
+        }
     } catch (error) {
         console.error('Error fetching modules:', error);
     }
@@ -1173,6 +1228,17 @@ function fetchThreadsSetting() {
 
 document.addEventListener('DOMContentLoaded', () => {
     fetchRecords();
+
+    // Populate VM module filter when filter modal is shown
+    const filterModal = document.getElementById('filterModal');
+    if (filterModal) {
+        filterModal.addEventListener('shown.bs.modal', function () {
+            console.log('Filter modal opened, populating module filters...');
+            populateModuleFilter();
+        });
+    } else {
+        console.warn('Filter modal element not found');
+    }
 
     const socket = io();
 

@@ -1,0 +1,40 @@
+# Core Flask dependencies
+Flask
+Flask-SQLAlchemy
+Flask-Login
+Flask-Migrate
+Flask-SocketIO
+Flask-Bcrypt
+gevent
+
+# Database
+SQLAlchemy
+alembic
+
+# HTTP requests and web scraping
+requests
+curl-cffi
+tls-client
+beautifulsoup4
+
+# Data processing
+pandas
+numpy
+
+# Utilities
+colorama
+python-dateutil
+urllib3
+
+# Async support
+asyncio
+
+# Type hints
+typing-extensions
+
+# Collections compatibility
+collections-extended
+
+# SocketIO dependencies
+python-socketio
+eventlet

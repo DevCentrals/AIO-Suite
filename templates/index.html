@@ -120,7 +120,7 @@
               <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-              <form id="filter-form" onsubmit="applyFilters(); return false;">
+              <form id="filter-form">
                 <div class="row">
                   <div class="col-md-6">
                     <div class="card mb-3">
@@ -170,6 +170,7 @@
                           <label class="form-label">Validation Status</label>
                           <select id="vm-status" class="form-control">
                             <option value="">Any status</option>
+                            <option value="not-checked">Not VM checked</option>
                             <option value="valid">At least one valid</option>
                             <option value="invalid">At least one invalid</option>
                             <option value="all-valid">All valid</option>
@@ -177,10 +178,18 @@
                           </select>
                         </div>
                         <div class="mb-3">
-                          <label for="module-filter" class="form-label">Specific Modules</label>
-                          <select id="module-filter" class="form-control" multiple>
+                          <label for="vm-module-filter" class="form-label">Specific VM Modules</label>
+                          <select id="vm-module-filter" class="form-control" multiple>
                           </select>
-                          <small class="text-muted">Hold CTRL to select multiple</small>
+                          <small class="text-muted">Hold CTRL to select multiple modules</small>
+                        </div>
+                        <div class="mb-3">
+                          <label for="vm-module-status" class="form-label">VM Module Status</label>
+                          <select id="vm-module-status" class="form-control">
+                            <option value="">Any result</option>
+                            <option value="valid">Valid</option>
+                            <option value="invalid">Invalid</option>
+                          </select>
                         </div>
                       </div>
                     </div>
@@ -188,7 +197,7 @@
                 </div>
                 
                 <div class="d-grid gap-2 mt-3">
-                  <button type="submit" class="btn btn-primary">Apply Filters</button>
+                  <button type="button" class="btn btn-primary" onclick="applyFilters()">Apply Filters</button>
                   <button type="button" class="btn btn-secondary" onclick="resetFilters()">Reset Filters</button>
                 </div>
               </form>
