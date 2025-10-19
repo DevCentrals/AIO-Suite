@@ -1,6 +1,7 @@
 from bs4 import BeautifulSoup
 from typing import Optional, Dict, List
 import time
+import sys
 from curl_cffi import CurlMime, requests
 
 class SearchAPIProcessor:
@@ -102,8 +103,11 @@ class SearchAPIProcessor:
     def supports_email(self, email: str) -> bool:
         return True
 
-    def get_captcha_solution(self):
-        while True:
+    def get_captcha_solution(self) -> str:
+        max_attempts = 3
+        max_wait_time = 120
+        
+        for attempt in range(max_attempts):
             try:
                 payload = {
                     "clientKey": self.capsolver_key,
@@ -114,17 +118,20 @@ class SearchAPIProcessor:
                     }
                 }
 
-                response = requests.post("http://api.capsolver.com/createTask", json=payload)
+                response = requests.post("http://api.capsolver.com/createTask", json=payload, timeout=30)
                 response_data = response.json()
 
                 task_id = response_data.get("taskId")
                 if not task_id:
                     print(f"Failed to get taskId from Capsolver response: {response_data}")
-                    raise Exception("No taskId returned from createTask")
+                    if attempt == max_attempts - 1:
+                        raise Exception("No taskId returned from createTask")
+                    continue
 
-                while True:
+                start_time = time.time()
+                while time.time() - start_time < max_wait_time:
                     task_result_payload = {"clientKey": self.capsolver_key, "taskId": task_id}
-                    result_response = requests.post("http://api.capsolver.com/getTaskResult", json=task_result_payload)
+                    result_response = requests.post("http://api.capsolver.com/getTaskResult", json=task_result_payload, timeout=30)
 
                     if result_response.status_code == 403:
                         print("Received a 403 error. Check your API key, task ID, or possible IP blocking.")
@@ -137,7 +144,19 @@ class SearchAPIProcessor:
                     result_data = result_response.json()
                     if result_data.get("status") == "ready":
                         return result_data.get("solution", {}).get("gRecaptchaResponse")
+                    
+                    if result_data.get("status") == "failed":
+                        print(f"Captcha task failed: {result_data}")
+                        break
 
-                    time.sleep(1)
+                    time.sleep(2)
+                
+                print(f"Captcha task timed out after {max_wait_time} seconds (attempt {attempt + 1}/{max_attempts})")
+                
             except Exception as e:
-                print(f"Captcha solving error: {e}")
+                print(f"Captcha solving error (attempt {attempt + 1}/{max_attempts}): {e}")
+                if attempt == max_attempts - 1:
+                    raise e
+                time.sleep(5)
+        
+        raise Exception("Failed to solve captcha after all attempts")

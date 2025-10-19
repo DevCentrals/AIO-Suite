@@ -1,18 +1,40 @@
 import random
+import sys
+from typing import List
+from functools import lru_cache
 
-def load_all_proxies() -> list[str]:
-    proxies = []
-    with open('proxies.txt') as f:
-        proxies = f.read().splitlines()
+_proxy_cache = None
+_proxy_index = 0
 
-    formatted_proxies = []
-    for proxy in proxies:
-        try:
-            proxy = f"http://{proxy}"
-            formatted_proxies.append(proxy)
-        except:
-            pass
-    return formatted_proxies
+def load_all_proxies() -> List[str]:
+    try:
+        with open('proxies.txt', 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        lines = content.splitlines()
+        proxies = [
+            f"http://{line.strip()}" 
+            for line in lines 
+            if line.strip() and '@' in line and ':' in line
+        ]
+        return proxies
+    except FileNotFoundError:
+        print("Warning: proxies.txt not found")
+        return []
+    except Exception as e:
+        print(f"Error reading proxies.txt: {e}")
+        return []
 
-def get_proxy(proxies):
+def get_proxy(proxies: List[str]) -> str:
+    if not proxies:
+        return ""
+    
+    global _proxy_index
+    _proxy_index = (_proxy_index + 1) % len(proxies)
+    return proxies[_proxy_index]
+
+def get_random_proxy(proxies: List[str]) -> str:
+    if not proxies:
+        return ""
+    
     return random.choice(proxies)

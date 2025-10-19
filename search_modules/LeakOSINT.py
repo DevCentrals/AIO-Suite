@@ -1,5 +1,6 @@
-import requests, json, re
+import requests, json, re, time
 from typing import Optional, Dict
+from datetime import datetime, date
 
 ZIP_PATTERN = r'\b\d{5}(-\d{4})?\b'
 STREET_PATTERN = r'\d+\s+[A-Za-z]+(?:\s+[A-Za-z]+)*\s+(?:St|Street|Ave|Avenue|Blvd|Boulevard|Dr|Drive|Rd|Road|Ln|Lane|Ct|Court|Pl|Place|Way|Terrace|Trail|Circle|Square|Pkwy|Parkway)'
@@ -54,12 +55,46 @@ class SearchAPIProcessor:
             return address1
 
     @staticmethod
+    def age_to_dob(age: int) -> str:
+        """Convert age to date of birth (DOB) in YYYY-MM-DD format"""
+        try:
+            current_year = datetime.now().year
+            birth_year = current_year - age
+            # Use January 1st as default date
+            dob = date(birth_year, 1, 1)
+            return dob.strftime('%Y-%m-%d')
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def clean_phone_number(phone: str) -> str:
+        """Clean and format phone number for consistent output"""
+        # Remove all non-digit characters except + at the beginning
+        cleaned = re.sub(r'[^\d\+]', '', phone)
+        
+        # Handle US phone numbers (10 digits)
+        if len(cleaned) == 10 and not cleaned.startswith('+'):
+            return f"({cleaned[:3]}) {cleaned[3:6]}-{cleaned[6:]}"
+        
+        # Handle US phone numbers with country code (11 digits starting with 1)
+        if len(cleaned) == 11 and cleaned.startswith('1'):
+            return f"({cleaned[1:4]}) {cleaned[4:7]}-{cleaned[7:]}"
+        
+        # Handle international numbers with +
+        if cleaned.startswith('+') and len(cleaned) >= 11:
+            return cleaned
+        
+        # Return as-is if it doesn't match common patterns
+        return phone
+
+    @staticmethod
     def extract_details(json_response: dict) -> dict:
         details = {
             'name': None,
             'phone_numbers': [],
             'address': None,
-            'age': None
+            'age': None,
+            'dob': None
         }
 
         address_details = {
@@ -93,17 +128,21 @@ class SearchAPIProcessor:
                             except:
                                 pass
 
-                if not details['phone_numbers']:
-                    for phone_key in phone_variations:
-                        if phone_key in record_lower:
-                            phone = record_lower[phone_key]
-                            if phone and "XX" not in phone and "**" not in phone:
-                                try:
-                                    int(phone.replace("+", ""))
-                                    if 4 < len(phone) < 15:
-                                        details['phone_numbers'].append(phone)
-                                except:
-                                    pass
+                # Extract ALL phone numbers, not just the first one
+                for phone_key in phone_variations:
+                    if phone_key in record_lower:
+                        phone = record_lower[phone_key]
+                        if phone and isinstance(phone, str):
+                            # Skip masked or invalid phone numbers
+                            if not any(x in phone.upper() for x in ['XX', '**', 'NULL', 'NONE', 'N/A']):
+                                # Clean and format the phone number
+                                cleaned_phone = SearchAPIProcessor.clean_phone_number(phone)
+                                # Check if it's a valid phone number format
+                                digits_only = re.sub(r'[^\d]', '', cleaned_phone)
+                                if 7 <= len(digits_only) <= 15:
+                                    # Avoid duplicates
+                                    if cleaned_phone not in details['phone_numbers']:
+                                        details['phone_numbers'].append(cleaned_phone)
 
                 if not address_details['address']:
                     for addr_key in address_variations:
@@ -134,14 +173,30 @@ class SearchAPIProcessor:
                         address_details['billing'] = record_lower[addr_key]
                         break
 
-                if not details['age']:
+                # Extract age and convert to DOB
+                if not details['age'] and not details['dob']:
                     for age_key in age_variations:
                         if age_key in record_lower:
                             birthdate = record_lower.get(age_key)
                             if birthdate and birthdate != 'NULL':
                                 try:
-                                    birth_year = int(birthdate.split('-')[0]) if '-' in birthdate else int(birthdate)
-                                    details['age'] = 2024 - birth_year
+                                    # Check if it's already a year (4 digits)
+                                    if len(str(birthdate)) == 4 and str(birthdate).isdigit():
+                                        birth_year = int(birthdate)
+                                        age = datetime.now().year - birth_year
+                                        details['age'] = age
+                                        details['dob'] = SearchAPIProcessor.age_to_dob(age)
+                                    # Check if it's an age (1-3 digits)
+                                    elif str(birthdate).isdigit() and 1 <= int(birthdate) <= 120:
+                                        age = int(birthdate)
+                                        details['age'] = age
+                                        details['dob'] = SearchAPIProcessor.age_to_dob(age)
+                                    # Check if it's a full date format
+                                    elif '-' in birthdate:
+                                        birth_year = int(birthdate.split('-')[0])
+                                        age = datetime.now().year - birth_year
+                                        details['age'] = age
+                                        details['dob'] = birthdate  # Use the original date if available
                                 except:
                                     pass
 
@@ -162,13 +217,20 @@ class SearchAPIProcessor:
             data = {"token": leakosint_key, "request": f"{email}", "limit": 600, "lang": "en", "type": "json"}
             url = 'https://leakosintapi.com/'
 
-            while True:
+            max_retries = 3
+            retry_count = 0
+            
+            while retry_count < max_retries:
                 try:
-                    response = requests.post(url, json=data, proxies={'http': proxy, 'https': proxy})
+                    response = requests.post(url, json=data, proxies={'http': proxy, 'https': proxy}, timeout=10)
+                    #print(response.text)
                     break
                 except Exception as e:
-                    print(f"Error during request: {e}")
-                    return None
+                    retry_count += 1
+                    print(f"Error during request (attempt {retry_count}/{max_retries}): {e}")
+                    if retry_count >= max_retries:
+                        return None
+                    time.sleep(2)  # Wait before retry
 
             if 'error' in response.json() and 'You are running too many queries' in response.json()['error']:
                 raise Exception("Ratelimited!")

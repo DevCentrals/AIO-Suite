@@ -1,40 +1,47 @@
 # Core Flask dependencies
-Flask
-Flask-SQLAlchemy
-Flask-Login
-Flask-Migrate
-Flask-SocketIO
-Flask-Bcrypt
-gevent
+Flask>=3.0.0
+Flask-SQLAlchemy>=3.1.0
+Flask-Login>=0.6.3
+Flask-Migrate>=4.0.5
+Flask-SocketIO>=5.3.6
+Flask-Bcrypt>=1.0.1
+gevent>=23.9.1
 
 # Database
-SQLAlchemy
-alembic
+SQLAlchemy>=2.0.23
+alembic>=1.13.1
 
 # HTTP requests and web scraping
-requests
-curl-cffi
-tls-client
-beautifulsoup4
+requests>=2.31.0
+curl-cffi>=0.6.2
+tls-client>=0.2.2
+beautifulsoup4>=4.12.2
 
 # Data processing
-pandas
-numpy
+pandas>=2.1.4
+numpy>=1.26.2
 
 # Utilities
-colorama
-python-dateutil
-urllib3
+colorama>=0.4.6
+python-dateutil>=2.8.2
+urllib3>=2.1.0
 
-# Async support
-asyncio
+# Async support - Built into Python 3.14
+# asyncio is part of standard library
 
 # Type hints
-typing-extensions
+typing-extensions>=4.8.0
 
 # Collections compatibility
-collections-extended
+collections-extended>=2.0.1
 
 # SocketIO dependencies
-python-socketio
-eventlet
+python-socketio>=5.10.0
+eventlet>=0.33.3
+
+# Additional Python 3.14 specific dependencies
+# Zstandard compression support (PEP 784)
+zstandard>=0.22.0
+
+# Enhanced UUID support for versions 6-8
+uuid>=1.30

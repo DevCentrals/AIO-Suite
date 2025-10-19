@@ -262,7 +262,9 @@ class SearchAPIProcessor:
         proxy_login, proxy_password = login_info.split(":")
         proxy_address, proxy_port = proxy_info.split(":")
         
-        while True:     
+        max_attempts = 3
+        
+        for attempt in range(max_attempts):
             start_time = time.time()          
             try:
                 payload = {
@@ -282,25 +284,22 @@ class SearchAPIProcessor:
                 }
                 }
 
-                response = requests.post("https://api.capmonster.cloud/createTask", json=payload)
+                response = requests.post("https://api.capmonster.cloud/createTask", json=payload, timeout=30)
                 task_id = response.json().get("taskId")
 
-                while True:
-                    if time.time() - start_time > max_execution_time:
-                        print("Maximum execution time exceeded")
-                        return None
-                        
+                while time.time() - start_time < max_execution_time:
                     task_result_payload = {
                         "clientKey": self.CAPMON_KEY,
                         "taskId": task_id
                     }
-                    response = requests.post("https://api.capmonster.cloud/getTaskResult", json=task_result_payload)
+                    response = requests.post("https://api.capmonster.cloud/getTaskResult", json=task_result_payload, timeout=30)
 
                     if response.status_code == 403:
                         print("Received a 403 error. Check your API key, task ID, or possible IP blocking.")
                         raise Exception
 
                     if "ERROR_" in response.text:
+                        print(f"Capmonster error: {response.text}")
                         break
 
                     result = response.json().get("status")
@@ -308,15 +307,28 @@ class SearchAPIProcessor:
                     if result == "ready":
                         cf_clearance = response.json().get("solution").get("cf_clearance")
                         return cf_clearance
-                    time.sleep(1)
+                    
+                    if result == "failed":
+                        print("Captcha task failed")
+                        break
+                        
+                    time.sleep(2)
+                
+                print(f"Captcha task timed out after {max_execution_time} seconds (attempt {attempt + 1}/{max_attempts})")
+                
             except Exception as e:
-                print(e)
-                traceback.format_exc()
+                print(f"Captcha solving error (attempt {attempt + 1}/{max_attempts}): {e}")
+                if attempt == max_attempts - 1:
+                    raise e
+                time.sleep(5)
+        
+        return None
                 
     def get_turnstile_solution(self, max_execution_time=30):
-        start_time = time.time()
+        max_attempts = 3
         
-        while True:           
+        for attempt in range(max_attempts):
+            start_time = time.time()
             try:
                 payload = {
                     "clientKey": self.CAPMON_KEY,
@@ -327,21 +339,18 @@ class SearchAPIProcessor:
                     }
                 }
 
-                response = requests.post("https://api.capmonster.cloud/createTask", json=payload)
+                response = requests.post("https://api.capmonster.cloud/createTask", json=payload, timeout=30)
                 task_id = response.json().get("taskId")
 
-                while True:
-                    if time.time() - start_time > max_execution_time:
-                        print("Maximum solve time exceeded")
-                        return None
-                        
+                while time.time() - start_time < max_execution_time:
                     task_result_payload = {
                         "clientKey": self.CAPMON_KEY,
                         "taskId": task_id
                     }
-                    response = requests.post("https://api.capmonster.cloud/getTaskResult", json=task_result_payload)
+                    response = requests.post("https://api.capmonster.cloud/getTaskResult", json=task_result_payload, timeout=30)
                     
                     if response.status_code == 403:
+                        print("Received 403 error from Capmonster")
                         raise Exception
 
                     if "ERROR_" in response.text:
@@ -353,6 +362,19 @@ class SearchAPIProcessor:
                     if result == "ready":
                         token = response.json().get("solution").get("token")
                         return token
-                    time.sleep(1)
+                    
+                    if result == "failed":
+                        print("Turnstile task failed")
+                        break
+                        
+                    time.sleep(2)
+                
+                print(f"Turnstile task timed out after {max_execution_time} seconds (attempt {attempt + 1}/{max_attempts})")
+                
             except Exception as e:
-                raise Exception
+                print(f"Turnstile solving error (attempt {attempt + 1}/{max_attempts}): {e}")
+                if attempt == max_attempts - 1:
+                    raise e
+                time.sleep(5)
+        
+        return None

@@ -7,6 +7,11 @@ import concurrent.futures
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 import asyncio
+import sys
+from functools import lru_cache
+from collections import defaultdict
+import threading
+import time
 
 from flask import Flask, render_template, request, redirect, url_for, jsonify, current_app
 from flask_sqlalchemy import SQLAlchemy
@@ -21,19 +26,181 @@ from database import db, Email, Settings, User
 from utils import get_proxy, load_all_proxies
 from auth import auth_bp
 
+_proxy_cache = None
+_settings_cache = None
+_email_regex = re.compile(r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$')
+_performance_stats = defaultdict(int)
+_performance_lock = threading.Lock()
+
+@lru_cache(maxsize=1000)
+def _cached_email_validation(email: str) -> bool:
+    return bool(_email_regex.match(email))
+
+def validate_proxies():
+    global _proxy_cache
+    try:
+        if not os.path.exists('proxies.txt'):
+            print("WARNING: proxies.txt file not found!")
+            print("Please provide proxies in proxies.txt with format: username:password@host:port")
+            print("Application will continue but some features may not work properly.")
+            return False
+        
+        with open('proxies.txt', 'r', encoding='utf-8') as f:
+            content = f.read().strip()
+            
+        if not content:
+            print("WARNING: proxies.txt file is empty!")
+            print("Please provide proxies in proxies.txt with format: username:password@host:port")
+            print("Application will continue but some features may not work properly.")
+            return False
+        
+        lines = content.splitlines()
+        valid_proxies = sum(1 for line in lines if line.strip() and '@' in line and ':' in line)
+        
+        if valid_proxies == 0:
+            print("WARNING: No valid proxies found in proxies.txt!")
+            print("Please provide proxies in proxies.txt with format: username:password@host:port")
+            print("Application will continue but some features may not work properly.")
+            return False
+        
+        _proxy_cache = [f"http://{line.strip()}" for line in lines if line.strip() and '@' in line and ':' in line]
+        
+        print(f"Found {valid_proxies} valid proxies in proxies.txt")
+        return True
+        
+    except Exception as e:
+        print(f"WARNING: Error reading proxies.txt: {e}")
+        print("Please provide proxies in proxies.txt with format: username:password@host:port")
+        print("Application will continue but some features may not work properly.")
+        return False
+
+def detect_python314_features():
+    features = {
+        'is_python314': sys.version_info >= (3, 14),
+        'free_threaded': False,
+        'template_strings': False,
+        'deferred_annotations': True,
+        'multiple_interpreters': False,
+        'zstandard': False,
+        'jit_compiler': False
+    }
+    
+    if not features['is_python314']:
+        return features
+    
+    try:
+        import threading
+        features['free_threaded'] = hasattr(threading, '_threading_local')
+    except:
+        pass
+    
+    try:
+        compile('t"test {var}"', '<string>', 'eval')
+        features['template_strings'] = True
+    except:
+        pass
+    
+    try:
+        import interpreters
+        features['multiple_interpreters'] = True
+    except ImportError:
+        pass
+    
+    try:
+        import compression.zstd
+        features['zstandard'] = True
+    except ImportError:
+        pass
+    
+    try:
+        import _jit
+        features['jit_compiler'] = True
+    except ImportError:
+        pass
+    
+    return features
+
+def get_optimized_config():
+    features = detect_python314_features()
+    
+    config = {
+        'SQLALCHEMY_ENGINE_OPTIONS': {
+            'pool_size': 20,
+            'max_overflow': 30,
+            'pool_timeout': 60,
+            'pool_recycle': 1800,
+            'pool_pre_ping': True,
+        }
+    }
+    
+    if features['is_python314']:
+        if features['free_threaded']:
+            config['SQLALCHEMY_ENGINE_OPTIONS']['connect_args'] = {
+                'check_same_thread': False,
+                'timeout': 30
+            }
+        
+        if features['multiple_interpreters']:
+            config['INTERPRETER_OPTIONS'] = {
+                'use_multiple_interpreters': True,
+                'max_interpreters': 4
+            }
+        
+        if features['zstandard']:
+            config['COMPRESSION_OPTIONS'] = {
+                'use_zstandard': True,
+                'compression_level': 6
+            }
+    
+    return config
+
+python314_features = detect_python314_features()
+optimized_config = get_optimized_config()
+
+def get_optimization_status():
+    return {
+        'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        'is_python314': python314_features['is_python314'],
+        'available_features': {k: v for k, v in python314_features.items() if k != 'is_python314'},
+        'optimizations_applied': list(optimized_config.keys()),
+        'cached_modules': len(ModuleLoader._module_cache),
+        'cached_search_modules': len(SearchProcessor._search_modules_cache) if SearchProcessor._search_modules_cache else 0
+    }
+
+def clear_caches():
+    global _proxy_cache, _module_info_cache, _module_info_cache_time
+    
+    ModuleLoader._module_cache.clear()
+    SearchProcessor._search_modules_cache = None
+    SearchProcessor._required_settings_cache = None
+    SearchProcessor._processor_instances.clear()
+    _proxy_cache = None
+    _module_info_cache = None
+    _module_info_cache_time = 0
+    
+    with _performance_lock:
+        _performance_stats.clear()
+    
+    print("All caches cleared successfully")
+
 app = Flask(__name__)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_size': 20,
-    'max_overflow': 30,
-    'pool_timeout': 60,
-    'pool_recycle': 1800,
-    'pool_pre_ping': True
-}
 app.config['SECRET_KEY'] = '67a5a25c-7acc-800f-bff4-1b84e2762944'
 app.config['ALLOW_REGISTRATION'] = False
+
+app.config.update(optimized_config)
+
+validate_proxies()
+
+if python314_features['is_python314']:
+    print("Python 3.14 detected - optimizations enabled")
+    available_features = [k for k, v in python314_features.items() if v and k != 'is_python314']
+    if available_features:
+        print(f"Available features: {', '.join(available_features)}")
+else:
+    print(f"Running on Python {sys.version_info.major}.{sys.version_info.minor} - basic configuration")
 
 socketio = SocketIO(app, async_mode='threading')
 
@@ -46,7 +213,7 @@ login_manager.login_view = 'auth.login'
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    return db.session.get(User, int(user_id))
 
 app.register_blueprint(auth_bp)
 
@@ -60,21 +227,32 @@ class ModuleResult:
     data: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 class ModuleLoader:
+    _module_cache = {}
+    _processor_cache = {}
+    _settings_cache = {}
+    
     @staticmethod
     def load_modules(folder_path: str) -> Dict[str, Any]:
+        if folder_path in ModuleLoader._module_cache:
+            return ModuleLoader._module_cache[folder_path]
+            
         modules = {}
         if not os.path.exists(folder_path):
+            ModuleLoader._module_cache[folder_path] = modules
             return modules
-            
-        for file_name in os.listdir(folder_path):
-            if file_name.endswith(".py"):
-                module_name = file_name[:-3]
-                module_path = f"{folder_path}.{module_name}"
-                try:
-                    module = importlib.import_module(module_path)
-                    modules[module_name] = module
-                except ImportError as e:
-                    print(f"Failed to import module {module_name}: {e}")
+        
+        py_files = [f for f in os.listdir(folder_path) if f.endswith(".py")]
+        
+        for file_name in py_files:
+            module_name = file_name[:-3]
+            module_path = f"{folder_path}.{module_name}"
+            try:
+                module = importlib.import_module(module_path)
+                modules[module_name] = module
+            except ImportError as e:
+                print(f"Failed to import module {module_name}: {e}")
+        
+        ModuleLoader._module_cache[folder_path] = modules
         return modules
 
     @staticmethod
@@ -89,9 +267,17 @@ class ModuleLoader:
                         required_settings[module_name] = settings
         return required_settings
 class SearchProcessor:
+    _search_modules_cache = None
+    _required_settings_cache = None
+    _processor_instances = {}
+    
     def __init__(self):
-        self.search_modules = ModuleLoader.load_modules('search_modules')
-        self.required_settings = ModuleLoader.get_required_settings(self.search_modules)
+        if SearchProcessor._search_modules_cache is None:
+            SearchProcessor._search_modules_cache = ModuleLoader.load_modules('search_modules')
+            SearchProcessor._required_settings_cache = ModuleLoader.get_required_settings(SearchProcessor._search_modules_cache)
+        
+        self.search_modules = SearchProcessor._search_modules_cache
+        self.required_settings = SearchProcessor._required_settings_cache
         
     def process_email(self, email: str, module_name: str, settings: Dict[str, str], proxies: List[str]) -> ModuleResult:
         if module_name not in self.search_modules:
@@ -100,24 +286,32 @@ class SearchProcessor:
         module = self.search_modules[module_name]
         if not hasattr(module, 'SearchAPIProcessor'):
             return ModuleResult(success=False, error=f"Module {module_name} does not have SearchAPIProcessor")
-            
-        processor = module.SearchAPIProcessor()
+        
+        processor_key = f"{module_name}_{id(settings)}"
+        if processor_key not in SearchProcessor._processor_instances:
+            SearchProcessor._processor_instances[processor_key] = module.SearchAPIProcessor()
+        
+        processor = SearchProcessor._processor_instances[processor_key]
+        
+        proxy_list = _proxy_cache if _proxy_cache else proxies
         
         for attempt in range(MAX_RETRIES):
             try:
-                proxy = get_proxy(proxies)
+                proxy = get_proxy(proxy_list)
                 result = processor.search(email, settings, proxy)
                 
                 if result is not None:
+                    with _performance_lock:
+                        _performance_stats[f"{module_name}_success"] += 1
                     return ModuleResult(success=True, data=result)
                 
-                # No results found is not a failure, it's a valid outcome
                 return ModuleResult(success=True, data=None, error="No results found")
             
             except Exception as e:
+                with _performance_lock:
+                    _performance_stats[f"{module_name}_error"] += 1
                 if attempt == MAX_RETRIES - 1:
                     return ModuleResult(success=False, error=str(e))
-                import time
                 time.sleep(RETRY_DELAY_SECONDS)
                 
         return ModuleResult(success=False, error="Max retries reached")
@@ -132,7 +326,6 @@ def convert_to_american_format(phone_number: str) -> str:
 
 def get_first_string(val):
     if isinstance(val, list):
-        # Find the first non-empty string in the list
         for item in val:
             if item and str(item).strip():
                 return str(item).strip()
@@ -148,6 +341,32 @@ def index():
     emails = Email.query.all()
     return render_template('index.html', emails=emails)
 
+@app.route('/health')
+def health_check():
+    return jsonify({'status': 'ok', 'message': 'AIO-Suite is running'})
+
+@app.route('/test')
+def test_route():
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>AIO-Suite Test</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 50px; }
+            .success { color: green; font-size: 24px; }
+            .info { color: blue; margin: 20px 0; }
+        </style>
+    </head>
+    <body>
+        <h1 class="success">✓ AIO-Suite is Running!</h1>
+        <p class="info">The web server is responding correctly.</p>
+        <p><a href="/login">Go to Login Page</a></p>
+        <p><strong>Default Login:</strong> Username: admin, Password: admin123</p>
+    </body>
+    </html>
+    """
+
 @app.route('/upload', methods=['POST'])
 @login_required
 def upload_emails():
@@ -155,28 +374,45 @@ def upload_emails():
         emails = request.files['email_file']
         if emails:
             email_lines = emails.read().decode('utf-8').splitlines()
-            valid_emails = []
+            
             existing_emails = {email.email for email in Email.query.all()}
-        
+            
+            valid_emails = []
             for email in email_lines:
                 email = email.strip()
-                if re.match(EMAIL_REGEX, email) and email not in existing_emails:
+                if email and _cached_email_validation(email) and email not in existing_emails:
                     domain = email.split('@')[-1]
                     valid_emails.append(Email(email=email, domain=domain))
                     existing_emails.add(email)
+            
             if valid_emails:
                 try:
+                    # Use bulk operations for maximum performance
                     db.session.bulk_save_objects(valid_emails)
                     db.session.commit()
+                    with _performance_lock:
+                        _performance_stats['emails_uploaded'] += len(valid_emails)
                 except IntegrityError as e:
                     db.session.rollback()
                     print(f"Database Error: {e}")
         
         return redirect(url_for('index'))
     
+# Cache module info for better performance
+_module_info_cache = None
+_module_info_cache_time = 0
+CACHE_DURATION = 300  # 5 minutes
+
 @app.route('/get_modules')
 @login_required
 def get_modules():
+    global _module_info_cache, _module_info_cache_time
+    
+    # Use cached data if available and not expired
+    current_time = time.time()
+    if _module_info_cache and (current_time - _module_info_cache_time) < CACHE_DURATION:
+        return jsonify(_module_info_cache)
+    
     try:
         loaded_modules = ModuleLoader.load_modules('modules')
         additional_modules = ModuleLoader.load_modules('additional_modules')
@@ -199,13 +435,9 @@ def get_modules():
                             'developer': processor_instance.developer,
                             'module_name': module_name
                         })
-        else:
-            print("Error: Expected dictionaries for modules, but got something else.")
-            return jsonify({'modules': [], 'validmail_modules': []})
         
         if isinstance(search_modules, dict):
-            all_modules = {**search_modules}
-            for module_name, module in all_modules.items():
+            for module_name, module in search_modules.items():
                 if hasattr(module, 'SearchAPIProcessor'):
                     processor_class = getattr(module, 'SearchAPIProcessor')
                     processor_instance = processor_class()
@@ -215,9 +447,6 @@ def get_modules():
                             'developer': processor_instance.developer,
                             'module_name': module_name
                         })
-        else:
-            print("Error: Expected dictionaries for search_modules, but got something else.")
-            return jsonify({'search_modules': []})
 
         if isinstance(validmail_modules, dict):
             for module_name, module in validmail_modules.items():
@@ -231,11 +460,17 @@ def get_modules():
                             'module_name': module_name
                         })
 
-        return jsonify({
+        result = {
             'modules': module_info,
             'validmail_modules': validmail_info,
             'search_modules': search_modules_info
-        })
+        }
+        
+        # Cache the result
+        _module_info_cache = result
+        _module_info_cache_time = current_time
+        
+        return jsonify(result)
 
     except Exception as e:
         print(f"Error loading modules: {str(e)}")
@@ -271,10 +506,13 @@ def perform_vm_check():
                 if Settings.get_setting(setting) is not None
             }
 
+    # Pre-load all email records for better performance
+    email_records = {email.email: email for email in db.session.query(Email).filter(Email.email.in_(emails_to_lookup)).all()}
+    
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent_tasks) as executor:
         futures = {}
         for email in emails_to_lookup:
-            email_record = db.session.query(Email).filter_by(email=email).first()
+            email_record = email_records.get(email)
             if email_record:
                 futures[executor.submit(
                     process_email_for_validmail_check,
@@ -411,6 +649,9 @@ def perform_lookup():
         skipped_count = 0
         error_count = 0
         
+        # Pre-load all email records in one query for better performance
+        email_records = {email.email: email for email in db.session.query(Email).filter(Email.email.in_(emails_to_lookup)).all()}
+        
         # Process emails in smaller batches to avoid overwhelming the system
         batch_size = 500
         total_emails = len(emails_to_lookup)
@@ -422,7 +663,7 @@ def perform_lookup():
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent_tasks) as executor:
                 futures = {}
                 for email in batch_emails:
-                    email_record = db.session.query(Email).filter_by(email=email).first()
+                    email_record = email_records.get(email)
                     if email_record:
                         futures[executor.submit(
                             process_email_for_lookup,
@@ -467,28 +708,18 @@ def perform_lookup():
 
         socketio.emit('task_status', {'status': 'Task completed, check results.'})
         
-        status_batch_size = 1500
-        for status_batch_start in range(0, len(emails_to_lookup), status_batch_size):
-            status_batch_end = min(status_batch_start + status_batch_size, len(emails_to_lookup))
-            status_batch_emails = emails_to_lookup[status_batch_start:status_batch_end]
-            
+        # Batch update status for better performance
+        try:
             with app.app_context():
-                for email in status_batch_emails:
-                    try:
-                        email_record = db.session.query(Email).filter_by(email=email).first()
-                        if email_record and email_record.status == "pending":
-                            email_record.status = "Searched"
-                        elif email_record:
-                            pass
-                        else:
-                            pass
-                    except Exception as e:
-                        pass
-                
-                try:
-                    db.session.commit()
-                except Exception as e:
-                    db.session.rollback()
+                # Update all pending emails to "Searched" in one query
+                db.session.query(Email).filter(
+                    Email.email.in_(emails_to_lookup),
+                    Email.status == "pending"
+                ).update({"status": "Searched"}, synchronize_session=False)
+                db.session.commit()
+        except Exception as e:
+            print(f"Error updating email statuses: {e}")
+            db.session.rollback()
         
         try:
             pending_count = db.session.query(Email).filter_by(status="pending").count()
@@ -572,22 +803,26 @@ def process_email_for_lookup(app, email: str, proxies: List[str], settings: Dict
                         for num in merged_result['phone_numbers']
                     ]
             
-            # Save results to database
+            # Get email record for result emission
             email_record = db.session.query(Email).filter_by(email=email).first()
-            if email_record:
+            
+            # Save results to database - batch update for better performance
+            if merged_result:
                 try:
-                    # Update the email record with the found data
+                    update_data = {}
                     if merged_result.get('name'):
-                        email_record.name = merged_result['name']
+                        update_data['name'] = merged_result['name']
                     if merged_result.get('address'):
-                        email_record.address = merged_result['address']
+                        update_data['address'] = merged_result['address']
                     if merged_result.get('dob'):
-                        email_record.dob = merged_result['dob']
+                        update_data['dob'] = merged_result['dob']
                     if merged_result.get('phone_numbers'):
-                        email_record.phone_numbers = "; ".join(merged_result['phone_numbers'])
+                        update_data['phone_numbers'] = "; ".join(merged_result['phone_numbers'])
                     
-                    email_record.status = "Searched"
-                    db.session.commit()
+                    if update_data:
+                        update_data['status'] = "Searched"
+                        db.session.query(Email).filter_by(email=email).update(update_data)
+                        db.session.commit()
                 except Exception as e:
                     print(f"Error saving to database for {email}: {e}")
                     db.session.rollback()
@@ -812,10 +1047,13 @@ def perform_recovery_check():
         'total': len(emails_to_lookup)
     })
 
+    # Pre-load all email records for better performance
+    email_records = {email.email: email for email in db.session.query(Email).filter(Email.email.in_(emails_to_lookup)).all()}
+    
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent_tasks) as executor:
         futures = {}
         for email in emails_to_lookup:
-            email_record = db.session.query(Email).filter_by(email=email).first()
+            email_record = email_records.get(email)
             if email_record:
                 futures[executor.submit(
                     process_email_for_recovery_check, 
@@ -1023,6 +1261,47 @@ def get_setting(key):
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
+@app.route('/api/optimization-status', methods=['GET'])
+@login_required
+def optimization_status():
+    """Get current Python optimization status."""
+    try:
+        status = get_optimization_status()
+        return jsonify({'success': True, 'status': status})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/clear-caches', methods=['POST'])
+@login_required
+def clear_caches_endpoint():
+    """Clear all caches for memory management."""
+    try:
+        clear_caches()
+        return jsonify({'success': True, 'message': 'Caches cleared successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/performance-stats', methods=['GET'])
+@login_required
+def performance_stats():
+    """Get performance statistics."""
+    try:
+        with _performance_lock:
+            stats = dict(_performance_stats)
+        
+        # Add cache statistics
+        stats.update({
+            'cached_modules': len(ModuleLoader._module_cache),
+            'cached_search_modules': len(SearchProcessor._search_modules_cache) if SearchProcessor._search_modules_cache else 0,
+            'cached_processors': len(SearchProcessor._processor_instances),
+            'cached_proxies': len(_proxy_cache) if _proxy_cache else 0,
+            'module_info_cache_age': time.time() - _module_info_cache_time if _module_info_cache else 0
+        })
+        
+        return jsonify({'success': True, 'stats': stats})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 @socketio.on('connect')
 def handle_connect():
     print("Client connected!")
@@ -1032,23 +1311,33 @@ def handle_disconnect():
     print("Client disconnected!")
 
 if __name__ == "__main__":
+    print("Starting AIO-Suite application...")
+    
     with app.app_context():
+        print("Creating database tables...")
         db.create_all()
         
         default_settings = {
             'threads': '10',
         }
         
+        print("Creating directories...")
         for directory in DIRECTORIES:
             if not os.path.exists(directory):
                 os.makedirs(directory)
+                print(f"Created directory: {directory}")
                 
+        print("Loading modules...")
         modules = {}
         for directory in ['validmail_modules', 'search_modules', 'additional_modules', 'modules']:
-            modules.update(ModuleLoader.load_modules(directory))
+            loaded = ModuleLoader.load_modules(directory)
+            modules.update(loaded)
+            print(f"Loaded {len(loaded)} modules from {directory}")
             
+        print("Getting required settings...")
         required_settings = ModuleLoader.get_required_settings(modules)
         
+        print("Setting up default settings...")
         for key, value in default_settings.items():
             if not Settings.query.filter_by(key=key).first():
                 db.session.add(Settings(key=key, value=value))
@@ -1057,7 +1346,18 @@ if __name__ == "__main__":
             for setting in module_settings:
                 if not Settings.query.filter_by(key=setting).first():
                     db.session.add(Settings(key=setting, value=""))
+        
+        # Create default admin user if no users exist
+        if not User.query.first():
+            print("Creating default admin user...")
+            admin_user = User(username='admin', email='admin@example.com')
+            admin_user.set_password('admin123')
+            db.session.add(admin_user)
+            print("Default admin user created - Username: admin, Password: admin123")
                     
         db.session.commit()
+        print("Database setup complete!")
 
+    print("Starting web server...")
+    print("Application is ready! Access it at: http://127.0.0.1:5000")
     socketio.run(app, host='0.0.0.0', port=5000, debug=True)
