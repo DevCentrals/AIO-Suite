@@ -200,7 +200,14 @@ function handleFileSelection(file) {
         return;
     }
     
-    emailInputField.files = [file];
+    // Create a new FileList-like object for both file inputs
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(file);
+    
+    // Update both file inputs
+    fileInput.files = dataTransfer.files;
+    emailInputField.files = dataTransfer.files;
+    
     fileNameSpan.textContent = file.name;
     fileNameDisplay.style.display = "block";
     uploadBtn.style.display = "inline-block";
@@ -209,6 +216,13 @@ function handleFileSelection(file) {
 
 fileInput.addEventListener("change", () => {
     if (fileInput.files.length > 0) {
+        // Sync the hidden input with the visible one
+        const dataTransfer = new DataTransfer();
+        for (let i = 0; i < fileInput.files.length; i++) {
+            dataTransfer.items.add(fileInput.files[i]);
+        }
+        emailInputField.files = dataTransfer.files;
+        
         handleFileSelection(fileInput.files[0]);
     }
 });
