@@ -1,3 +1,4 @@
+// Cache bust: v7.0 - Clear address-zestimate pairing with numbered items
 const recordsPerPage = 250;
 let currentPage = 1;
 let totalRecords = 0;
@@ -24,6 +25,138 @@ const emailInputField = document.getElementById("email-input");
 const fileNameDisplay = document.getElementById("file-name-display");
 const fileNameSpan = document.getElementById("file-name");
 
+// Status badge helper function
+function getStatusBadge(status) {
+    const statusMap = {
+        'pending': { class: 'bg-secondary', text: 'Pending' },
+        'searched': { class: 'bg-success', text: 'Searched' },
+        'valid-mail-checked': { class: 'bg-info', text: 'VM Checked' },
+        'recovery-checked': { class: 'bg-warning', text: 'Recovery Checked' },
+        'error': { class: 'bg-danger', text: 'Error' },
+        'not-found': { class: 'bg-dark', text: 'Not Found' }
+    };
+    
+    const statusInfo = statusMap[status.toLowerCase()] || { class: 'bg-secondary', text: status };
+    return `<span class="badge ${statusInfo.class}">${statusInfo.text}</span>`;
+}
+
+// Toast notification system
+function showToast(type, title, message, duration = 5000) {
+    const toastContainer = document.getElementById('toast-container');
+    const toastId = 'toast-' + Date.now();
+    
+    const iconMap = {
+        'success': 'fas fa-check-circle',
+        'error': 'fas fa-exclamation-circle',
+        'warning': 'fas fa-exclamation-triangle',
+        'info': 'fas fa-info-circle'
+    };
+    
+    const toastHTML = `
+        <div id="${toastId}" class="toast toast-${type}" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header">
+                <i class="${iconMap[type]} me-2"></i>
+                <strong class="me-auto">${title}</strong>
+                <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+            <div class="toast-body">
+                ${message}
+            </div>
+        </div>
+    `;
+    
+    toastContainer.insertAdjacentHTML('beforeend', toastHTML);
+    
+    const toastElement = document.getElementById(toastId);
+    const toast = new bootstrap.Toast(toastElement, {
+        autohide: true,
+        delay: duration
+    });
+    
+    toast.show();
+    
+    // Remove from DOM after hiding
+    toastElement.addEventListener('hidden.bs.toast', () => {
+        toastElement.remove();
+    });
+}
+
+// Enhanced alert function using toasts
+function showAlert(type, message, title = null) {
+    const titleMap = {
+        'success': 'Success',
+        'error': 'Error',
+        'warning': 'Warning',
+        'info': 'Information'
+    };
+    
+    showToast(type, title || titleMap[type], message);
+}
+
+// Loading button state management
+function setButtonLoading(button, loading = true) {
+    if (loading) {
+        button.disabled = true;
+        button.dataset.originalText = button.innerHTML;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Loading...';
+    } else {
+        button.disabled = false;
+        button.innerHTML = button.dataset.originalText || button.innerHTML;
+    }
+}
+
+// Enhanced progress tracking
+function updateProgressWithDetails(message, progress = null) {
+    const progressMessageElem = document.getElementById('progress-message');
+    if (progressMessageElem) {
+        progressMessageElem.textContent = message;
+    }
+    
+    if (progress !== null) {
+        const progressBar = document.getElementById('progress-bar');
+        if (progressBar) {
+            progressBar.style.width = `${progress}%`;
+            progressBar.setAttribute('aria-valuenow', progress);
+        }
+    }
+}
+
+// Dark mode functionality
+function toggleDarkMode() {
+    const html = document.documentElement;
+    const themeIcon = document.getElementById('theme-icon');
+    const themeText = document.getElementById('theme-text');
+    
+    if (html.getAttribute('data-theme') === 'dark') {
+        html.removeAttribute('data-theme');
+        themeIcon.className = 'fas fa-moon';
+        themeText.textContent = 'Dark Mode';
+        localStorage.setItem('theme', 'light');
+        showAlert('info', 'Switched to light mode');
+    } else {
+        html.setAttribute('data-theme', 'dark');
+        themeIcon.className = 'fas fa-sun';
+        themeText.textContent = 'Light Mode';
+        localStorage.setItem('theme', 'dark');
+        showAlert('info', 'Switched to dark mode');
+    }
+}
+
+// Initialize theme on page load
+function initializeTheme() {
+    const savedTheme = localStorage.getItem('theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    
+    if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        const themeIcon = document.getElementById('theme-icon');
+        const themeText = document.getElementById('theme-text');
+        if (themeIcon && themeText) {
+            themeIcon.className = 'fas fa-sun';
+            themeText.textContent = 'Light Mode';
+        }
+    }
+}
 
 const openPanelBtn = document.getElementById('open-panel-btn');
 const modulePanel = document.getElementById('module-panel');
@@ -33,24 +166,22 @@ document.getElementById('export-csv-btn').onclick = showExportFormatModal;
 
 dropArea.addEventListener("dragover", (event) => {
     event.preventDefault();
-    dropArea.style.borderColor = "#0056b3";
+    dropArea.classList.add("dragover");
 });
 
-dropArea.addEventListener("dragleave", () => {
-    dropArea.style.borderColor = "#007bff";
+dropArea.addEventListener("dragleave", (event) => {
+    if (!dropArea.contains(event.relatedTarget)) {
+        dropArea.classList.remove("dragover");
+    }
 });
 
 dropArea.addEventListener("drop", (event) => {
     event.preventDefault();
-    dropArea.style.borderColor = "#007bff";
+    dropArea.classList.remove("dragover");
 
     const file = event.dataTransfer.files[0];
     if (file) {
-        emailInputField.files = event.dataTransfer.files;
-        fileNameSpan.textContent = file.name;
-        fileNameDisplay.style.display = "block";
-        uploadBtn.style.display = "inline-block";
-        uploadForm.style.display = "block";
+        handleFileSelection(file);
     }
 });
 
@@ -58,17 +189,53 @@ dropArea.addEventListener("click", () => {
     fileInput.click();
 });
 
+// File selection handler
+function handleFileSelection(file) {
+    // Validate file type
+    const allowedTypes = ['text/plain', 'text/csv', 'application/csv'];
+    const fileExtension = file.name.split('.').pop().toLowerCase();
+    
+    if (!allowedTypes.includes(file.type) && !['txt', 'csv'].includes(fileExtension)) {
+        alert('Please select a valid file (.txt or .csv)');
+        return;
+    }
+    
+    emailInputField.files = [file];
+    fileNameSpan.textContent = file.name;
+    fileNameDisplay.style.display = "block";
+    uploadBtn.style.display = "inline-block";
+    uploadForm.style.display = "block";
+}
+
 fileInput.addEventListener("change", () => {
     if (fileInput.files.length > 0) {
-        emailInputField.files = fileInput.files;
-        const file = fileInput.files[0];
-        fileNameSpan.textContent = file.name;
-        fileNameDisplay.style.display = "block";
-        uploadBtn.style.display = "inline-block";
-        uploadForm.style.display = "block";
+        handleFileSelection(fileInput.files[0]);
     }
 });
 
+// Mobile menu functionality
+document.getElementById('mobile-menu-toggle').addEventListener('click', function() {
+    document.getElementById('sidebar').classList.add('open');
+});
+
+document.getElementById('sidebar-close').addEventListener('click', function() {
+    document.getElementById('sidebar').classList.remove('open');
+});
+
+// Close sidebar when clicking outside on mobile
+document.addEventListener('click', function(event) {
+    const sidebar = document.getElementById('sidebar');
+    const mobileToggle = document.getElementById('mobile-menu-toggle');
+    
+    if (window.innerWidth <= 768 && 
+        sidebar.classList.contains('open') && 
+        !sidebar.contains(event.target) && 
+        !mobileToggle.contains(event.target)) {
+        sidebar.classList.remove('open');
+    }
+});
+
+// Panel functionality
 document.getElementById('open-panel-btn').addEventListener('click', function() {
     document.getElementById('module-panel').classList.add('open');
     this.style.display = 'none';
@@ -188,13 +355,13 @@ async function performValidMailCheck() {
         .map(checkbox => checkbox.value);
 
     if (selectedModules.length === 0) {
-        alert('Please select at least one module to run.');
+        showAlert('warning', 'Please select at least one module to run.');
         return;
     }
 
     const selectedEmails = executeAll ? await getAllMatchingEmails() : getSelectedEmails();
     if (selectedEmails.length === 0) {
-        alert('Please select at least one email to perform the check.');
+        showAlert('warning', 'Please select at least one email to perform the check.');
         return;
     }
 
@@ -216,13 +383,13 @@ async function performValidMailCheck() {
 
         const result = await response.json();
         if (response.ok) {
-            alert('Valid-mail check completed.');
+            showAlert('success', 'Valid-mail check completed successfully!');
         } else {
-            alert('An error occurred during the valid-mail check.');
+            showAlert('error', 'An error occurred during the valid-mail check.');
         }
     } catch (error) {
         console.error('Error during valid-mail check:', error);
-        alert('An error occurred. Please try again.');
+        showAlert('error', 'An error occurred. Please try again.');
     }
 }
 
@@ -238,28 +405,61 @@ async function fetchRecords(page = 1, filters = currentFilters) {
         const data = await response.json();
 
         tableBody.innerHTML = data.records.map(record => {
+            // Format status with badge
+            const statusBadge = getStatusBadge(record.status || 'pending');
+
+            // Format validmail results with badges
             const formattedValidmailResults = record.validmail_results ?
                 Object.entries(record.validmail_results).map(([module, result]) => {
-                    return `<strong>${module}</strong>: ${result ? 'Valid' : 'Invalid'}`;
-                }).join('<br>') :
+                    const badgeClass = result ? 'bg-success' : 'bg-danger';
+                    return `<span class="badge ${badgeClass} me-1 mb-1">${module}: ${result ? 'Valid' : 'Invalid'}</span>`;
+                }).join('') :
+                '<span class="text-muted">Not checked</span>';
+
+            // Format alternative names
+            const altNamesDisplay = record.alternative_names && record.alternative_names.length > 0 ?
+                record.alternative_names.slice(0, 2).join(', ') + (record.alternative_names.length > 2 ? ` +${record.alternative_names.length - 2} more` : '') : 
                 'N/A';
 
-            const row = `
+            // Format addresses and zestimates
+            const addresses = record.addresses_list && record.addresses_list.length > 0 ? record.addresses_list : [record.address || 'N/A'];
+            const zestimates = record.zestimate_values && record.zestimate_values.length > 0 ? record.zestimate_values : [null];
+            
+            // Format addresses display
+            const addressDisplay = addresses.length > 0 ? 
+                addresses.slice(0, 1).map(address => 
+                    `<div class="text-truncate" style="max-width: 200px;" title="${address}">${address}</div>`
+                ).join('') + (addresses.length > 1 ? `<small class="text-muted">+${addresses.length - 1} more</small>` : '') :
+                '<span class="text-muted">N/A</span>';
+            
+            // Format zestimates display
+            const zestimateDisplay = zestimates.length > 0 && zestimates[0] !== null && zestimates[0] !== undefined && zestimates[0] !== 'None' ? 
+                `<span class="text-success fw-bold">$${zestimates[0].toLocaleString()}</span>` + 
+                (zestimates.length > 1 ? `<br><small class="text-muted">+${zestimates.length - 1} more</small>` : '') :
+                '<span class="text-muted">N/A</span>';
+
+            // Format phone numbers
+            const phoneDisplay = record.phone_numbers ? 
+                (Array.isArray(record.phone_numbers) ? record.phone_numbers.join(', ') : record.phone_numbers) :
+                '<span class="text-muted">N/A</span>';
+
+            return `
                 <tr id="email-${CSS.escape(record.email)}" data-email="${CSS.escape(record.email)}">
-                    <td><input type="checkbox" name="selected_emails" value="${record.id}"></td>
-                    <td>${record.email}</td>
-                    <td id="status-${CSS.escape(record.email)}">${record.status || 'N/A'}</td>
-                    <td id="name-${CSS.escape(record.email)}">${record.name || 'N/A'}</td>
-                    <td id="phone_numbers-${CSS.escape(record.email)}">${record.phone_numbers || 'N/A'}</td>
-                    <td id="address-${CSS.escape(record.email)}">${record.address || 'N/A'}</td>
-                    <td id="dob-${CSS.escape(record.email)}">${record.dob || 'N/A'}</td>
-                    <td id="validmail_results-${CSS.escape(record.email)}">${formattedValidmailResults}</td>
+                    <td><input type="checkbox" name="selected_emails" value="${record.id}" class="form-check-input"></td>
+                    <td><div class="text-truncate fw-medium" style="max-width: 250px;" title="${record.email}">${record.email}</div></td>
+                    <td>${statusBadge}</td>
+                    <td><div class="text-truncate" style="max-width: 150px;" title="${record.name || 'N/A'}">${record.name || '<span class="text-muted">N/A</span>'}</div></td>
+                    <td><div class="text-truncate" style="max-width: 150px;" title="${phoneDisplay}">${phoneDisplay}</div></td>
+                    <td>${addressDisplay}</td>
+                    <td><div class="text-truncate" style="max-width: 100px;" title="${record.dob || 'N/A'}">${record.dob || '<span class="text-muted">N/A</span>'}</div></td>
+                    <td>${zestimateDisplay}</td>
+                    <td><div class="text-truncate" style="max-width: 150px;" title="${altNamesDisplay}">${altNamesDisplay === 'N/A' ? '<span class="text-muted">N/A</span>' : altNamesDisplay}</div></td>
+                    <td><div style="max-width: 200px;">${formattedValidmailResults}</div></td>
                 </tr>`;
-            return row;
         }).join('');
 
         totalRecords = data.total;
-        totalRecordsElem.textContent = `Total Records: ${totalRecords}`;
+        totalRecordsElem.textContent = totalRecords;
         updatePagination();
         populateStatusOptions(data.statuses);
         // Only populate module filters if elements exist
@@ -355,6 +555,26 @@ async function showExportFormatModal() {
                                     <span class="drag-handle me-2">☰</span>
                                     <input class="form-check-input me-2" type="checkbox" value="validmail_results" id="col-validmail" checked>
                                     <label class="form-check-label flex-grow-1" for="col-validmail">ValidMail Results</label>
+                                </div>
+                                <div class="list-group-item d-flex align-items-center" draggable="true" data-column="addresses_list">
+                                    <span class="drag-handle me-2">☰</span>
+                                    <input class="form-check-input me-2" type="checkbox" value="addresses_list" id="col-addresses" checked>
+                                    <label class="form-check-label flex-grow-1" for="col-addresses">Multiple Addresses</label>
+                                </div>
+                                <div class="list-group-item d-flex align-items-center" draggable="true" data-column="zestimate_values">
+                                    <span class="drag-handle me-2">☰</span>
+                                    <input class="form-check-input me-2" type="checkbox" value="zestimate_values" id="col-zestimate" checked>
+                                    <label class="form-check-label flex-grow-1" for="col-zestimate">Zestimate Values</label>
+                                </div>
+                                <div class="list-group-item d-flex align-items-center" draggable="true" data-column="property_details">
+                                    <span class="drag-handle me-2">☰</span>
+                                    <input class="form-check-input me-2" type="checkbox" value="property_details" id="col-property" checked>
+                                    <label class="form-check-label flex-grow-1" for="col-property">Property Details</label>
+                                </div>
+                                <div class="list-group-item d-flex align-items-center" draggable="true" data-column="alternative_names">
+                                    <span class="drag-handle me-2">☰</span>
+                                    <input class="form-check-input me-2" type="checkbox" value="alternative_names" id="col-altnames" checked>
+                                    <label class="form-check-label flex-grow-1" for="col-altnames">Alternative Names</label>
                                 </div>
                             </div>
                         </div>
@@ -723,28 +943,164 @@ async function getFilteredRecords() {
 }
 
 function loadSettings() {
-    fetch('/get_settings')
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                const settingsContent = document.getElementById('settings-content');
-                settingsContent.innerHTML = '';
-                for (const [key, value] of Object.entries(data.settings)) {
-                    const formGroup = `
-                        <div class="mb-3">
-                            <label for="${key}" class="form-label">${key}</label>
-                            <input type="text" class="form-control" id="${key}" name="${key}" value="${value}">
-                        </div>`;
-                    settingsContent.innerHTML += formGroup;
+    // Load both settings and modules to group settings by module
+    Promise.all([
+        fetch('/get_settings').then(response => response.json()),
+        fetch('/get_modules').then(response => response.json())
+    ])
+    .then(([settingsData, modulesData]) => {
+        if (settingsData.success) {
+            const settingsContent = document.getElementById('settings-content');
+            settingsContent.innerHTML = '';
+            
+            // Group settings by module
+            const moduleSettings = {};
+            const generalSettings = {};
+            
+            // Categorize settings
+            for (const [key, value] of Object.entries(settingsData.settings)) {
+                if (key === 'house_value' || key === 'search_api_key') {
+                    moduleSettings['SearchAPI'] = moduleSettings['SearchAPI'] || {};
+                    moduleSettings['SearchAPI'][key] = value;
+                } else if (key === 'threads') {
+                    // threads is a general setting
+                    generalSettings[key] = value;
+                } else {
+                    // For now, put everything else in general settings
+                    // In the future, we can expand this to categorize other module settings
+                    generalSettings[key] = value;
                 }
-            } else {
-                alert('Failed to load settings: ' + data.message);
             }
-        })
-        .catch(error => {
-            console.error('Error fetching settings:', error);
-            alert('An error occurred while loading settings.');
-        });
+            
+            
+            // Display SearchAPI module settings first
+            if (moduleSettings['SearchAPI']) {
+                const searchAPISettings = moduleSettings['SearchAPI'];
+                const searchAPIModule = modulesData.search_modules?.find(m => m.module_name === 'SearchAPI');
+                
+                let searchAPICard = `
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5 class="mb-0">
+                                <i class="fas fa-search me-2"></i>
+                                <strong>${searchAPIModule?.name || 'SearchAPI'}</strong>
+                                <small class="text-muted">by ${searchAPIModule?.developer || '@CPUCycle'}</small>
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                `;
+                
+                // SearchAPI Key
+                if (searchAPISettings['search_api_key'] !== undefined) {
+                    searchAPICard += `
+                        <div class="mb-3">
+                            <label for="search_api_key" class="form-label">Search API Key</label>
+                            <input type="text" class="form-control" id="search_api_key" name="search_api_key" value="${searchAPISettings['search_api_key'] || ''}">
+                            <small class="text-muted">API key for SearchAPI service</small>
+                        </div>
+                    `;
+                }
+                
+                // House Value Toggle
+                if (searchAPISettings['house_value'] !== undefined) {
+                    const houseValue = searchAPISettings['house_value'] || '';
+                    const isChecked = houseValue && ['true', '1', 'yes', 'on'].includes(houseValue.toLowerCase());
+                    searchAPICard += `
+                        <div class="mb-3">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="house_value" name="house_value" ${isChecked ? 'checked' : ''}>
+                                <label class="form-check-label" for="house_value">
+                                    <strong>House Value Features</strong>
+                                    <small class="text-muted d-block">Enable zestimate and property details extraction</small>
+                                </label>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                searchAPICard += `
+                        </div>
+                    </div>
+                `;
+                
+                settingsContent.innerHTML += searchAPICard;
+            }
+            
+            // Display other module settings
+            for (const [moduleName, settings] of Object.entries(moduleSettings)) {
+                if (moduleName === 'SearchAPI') continue; // Already handled above
+                
+                const module = modulesData.search_modules?.find(m => m.module_name === moduleName) || 
+                              modulesData.validmail_modules?.find(m => m.module_name === moduleName);
+                
+                if (module) {
+                    let moduleCard = `
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-cog me-2"></i>
+                                    <strong>${module.name}</strong>
+                                    <small class="text-muted">by ${module.developer}</small>
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                    `;
+                    
+                    for (const [key, value] of Object.entries(settings)) {
+                        moduleCard += `
+                            <div class="mb-3">
+                                <label for="${key}" class="form-label">${key.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</label>
+                                <input type="text" class="form-control" id="${key}" name="${key}" value="${value || ''}">
+                            </div>
+                        `;
+                    }
+                    
+                    moduleCard += `
+                            </div>
+                        </div>
+                    `;
+                    
+                    settingsContent.innerHTML += moduleCard;
+                }
+            }
+            
+            // Display general settings
+            if (Object.keys(generalSettings).length > 0) {
+                let generalCard = `
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5 class="mb-0">
+                                <i class="fas fa-cogs me-2"></i>
+                                <strong>General Settings</strong>
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                `;
+                
+                for (const [key, value] of Object.entries(generalSettings)) {
+                    generalCard += `
+                        <div class="mb-3">
+                            <label for="${key}" class="form-label">${key.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</label>
+                            <input type="text" class="form-control" id="${key}" name="${key}" value="${value || ''}">
+                        </div>
+                    `;
+                }
+                
+                generalCard += `
+                        </div>
+                    </div>
+                `;
+                
+                settingsContent.innerHTML += generalCard;
+            }
+        } else {
+            alert('Failed to load settings: ' + settingsData.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error fetching settings:', error);
+        alert('An error occurred while loading settings.');
+    });
 }
 
 function saveSettings() {
@@ -752,6 +1108,12 @@ function saveSettings() {
     const settings = {};
     formData.forEach((value, key) => {
         settings[key] = value;
+    });
+    
+    // Handle checkbox values (convert checked/unchecked to true/false)
+    const checkboxes = document.querySelectorAll('#settings-content input[type="checkbox"]');
+    checkboxes.forEach(checkbox => {
+        settings[checkbox.name] = checkbox.checked ? 'true' : 'false';
     });
 
     fetch('/update_settings', {
@@ -826,20 +1188,22 @@ async function performLookup() {
         .map(checkbox => checkbox.value);
 
     if (selectedModules.length === 0) {
-        alert('Please select at least one module to run.');
+        showAlert('warning', 'Please select at least one module to run.');
         return;
     }
 
-    showOverlay("Loading, please wait...");
     const selectedEmails = executeAll ? await getAllMatchingEmails() : getSelectedEmails();
-    initializeStats(selectedEmails.length);
-
     if (selectedEmails.length === 0) {
-        closeOverlay();
-        alert('Please select at least one email to perform the check.');
+        showAlert('warning', 'Please select at least one email to perform the check.');
         return;
     }
 
+    // Set loading state for submit button
+    const submitBtn = document.getElementById('search-modal-submit-btn');
+    setButtonLoading(submitBtn, true);
+
+    showOverlay("Starting email lookup...");
+    initializeStats(selectedEmails.length);
     $('#searchModal').modal('hide');
 
     try {
@@ -856,14 +1220,15 @@ async function performLookup() {
 
         const result = await response.json();
         if (response.ok) {
-            alert('Search completed.');
+            showAlert('success', `Search completed! Processing ${selectedEmails.length} emails.`);
         } else {
-            alert('An error occurred during the search.');
+            showAlert('error', 'An error occurred during the search.');
         }
     } catch (error) {
         console.error('Error during Search:', error);
-        alert('An error occurred. Please try again.');
+        showAlert('error', 'An error occurred. Please try again.');
     } finally {
+        setButtonLoading(submitBtn, false);
         closeOverlay();
     }
 }
@@ -883,6 +1248,13 @@ function resetFilters() {
   document.getElementById('has-phone').checked = false;
   document.getElementById('has-address').checked = false;
   document.getElementById('has-dob').checked = false;
+  
+  // Reset new SearchAPI filter options
+  document.getElementById('has-zestimate').checked = false;
+  document.getElementById('has-alternative-names').checked = false;
+  document.getElementById('has-multiple-addresses').checked = false;
+  document.getElementById('zestimate-min').value = '';
+  document.getElementById('zestimate-max').value = '';
   
   document.getElementById('vm-status').value = '';
   document.getElementById('module-filter').selectedIndex = -1;
@@ -922,6 +1294,23 @@ function applyFilters() {
       currentFilters.has_dob = true;
     }
     
+    // New SearchAPI filter options
+    if (document.getElementById('has-zestimate').checked) {
+      currentFilters.has_zestimate = true;
+    }
+    if (document.getElementById('has-alternative-names').checked) {
+      currentFilters.has_alternative_names = true;
+    }
+    if (document.getElementById('has-multiple-addresses').checked) {
+      currentFilters.has_multiple_addresses = true;
+    }
+    
+    // Zestimate range filters
+    const zestimateMin = document.getElementById('zestimate-min').value;
+    const zestimateMax = document.getElementById('zestimate-max').value;
+    if (zestimateMin) currentFilters.zestimate_min = zestimateMin;
+    if (zestimateMax) currentFilters.zestimate_max = zestimateMax;
+    
     const vmStatus = document.getElementById('vm-status').value;
     if (vmStatus) {
       currentFilters.vm_status = vmStatus;
@@ -958,9 +1347,6 @@ function applyFilters() {
     
     const filtersParam = encodeURIComponent(JSON.stringify(currentFilters));
     
-    console.log('Applied filters:', currentFilters);
-    console.log('Filters param:', filtersParam);
-    
     fetch(`/get_emails?page=1&records_per_page=${recordsPerPage}&filters=${filtersParam}`)
       .then(response => response.json())
       .then(data => {
@@ -970,22 +1356,45 @@ function applyFilters() {
               return `<strong>${module}</strong>: ${result ? 'Valid' : 'Invalid'}`;
             }).join('<br>') :
             'N/A';
+
+          // Format alternative names
+          const altNamesDisplay = record.alternative_names && record.alternative_names.length > 0 ?
+              record.alternative_names.slice(0, 2).join(', ') + (record.alternative_names.length > 2 ? ` +${record.alternative_names.length - 2} more` : '') : 
+              'N/A';
   
+          // Format addresses and zestimates in single row with clear pairing
+          const addresses = record.addresses_list && record.addresses_list.length > 0 ? record.addresses_list : [record.address || 'N/A'];
+          const zestimates = record.zestimate_values && record.zestimate_values.length > 0 ? record.zestimate_values : [null];
+          
+          // Format addresses display with numbering
+          const addressDisplay = addresses.map((address, index) => 
+              `<div class="address-item"><strong>Address ${index + 1}:</strong> ${address}</div>`
+          ).join('');
+          
+          // Format zestimates display with corresponding numbering
+          const zestimateDisplay = zestimates.map((zestimate, index) => {
+              const zestimateValue = (zestimate !== null && zestimate !== undefined && zestimate !== 'None') ? 
+                  `$${zestimate.toLocaleString()}` : 'N/A';
+              return `<div class="zestimate-item"><strong>Address ${index + 1}:</strong> ${zestimateValue}</div>`;
+          }).join('');
+
           return `
-            <tr id="email-${CSS.escape(record.email)}" data-email="${CSS.escape(record.email)}">
-              <td><input type="checkbox" name="selected_emails" value="${record.id}"></td>
-              <td>${record.email}</td>
-              <td id="status-${CSS.escape(record.email)}">${record.status || 'N/A'}</td>
-              <td id="name-${CSS.escape(record.email)}">${record.name || 'N/A'}</td>
-              <td id="phone_numbers-${CSS.escape(record.email)}">${record.phone_numbers || 'N/A'}</td>
-              <td id="address-${CSS.escape(record.email)}">${record.address || 'N/A'}</td>
-              <td id="dob-${CSS.escape(record.email)}">${record.dob || 'N/A'}</td>
-              <td id="validmail_results-${CSS.escape(record.email)}">${formattedValidmailResults}</td>
-            </tr>`;
+              <tr id="email-${CSS.escape(record.email)}" data-email="${CSS.escape(record.email)}">
+                  <td><input type="checkbox" name="selected_emails" value="${record.id}"></td>
+                  <td>${record.email}</td>
+                  <td>${record.status || 'N/A'}</td>
+                  <td>${record.name || 'N/A'}</td>
+                  <td>${record.phone_numbers || 'N/A'}</td>
+                  <td>${addressDisplay}</td>
+                  <td>${record.dob || 'N/A'}</td>
+                  <td>${zestimateDisplay}</td>
+                  <td><div class="text-truncate" style="max-width: 150px;" title="${altNamesDisplay}">${altNamesDisplay === 'N/A' ? '<span class="text-muted">N/A</span>' : altNamesDisplay}</div></td>
+                  <td>${formattedValidmailResults}</td>
+              </tr>`;
         }).join('');
   
         totalRecords = data.total;
-        totalRecordsElem.textContent = `Total Records: ${totalRecords}`;
+        totalRecordsElem.textContent = totalRecords;
         updatePagination();
         populateStatusOptions(data.statuses);
         // Only populate module filters if elements exist
@@ -1227,13 +1636,14 @@ function fetchThreadsSetting() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Initialize theme
+    initializeTheme();
+    
     fetchRecords();
 
-    // Populate VM module filter when filter modal is shown
     const filterModal = document.getElementById('filterModal');
     if (filterModal) {
         filterModal.addEventListener('shown.bs.modal', function () {
-            console.log('Filter modal opened, populating module filters...');
             populateModuleFilter();
         });
     } else {
@@ -1265,28 +1675,74 @@ document.addEventListener('DOMContentLoaded', () => {
         const row = document.getElementById(`email-${escapedEmail}`);
 
         if (row) {
-
-            const statusCell = document.getElementById(`status-${escapedEmail}`);
-            const nameCell = document.getElementById(`name-${escapedEmail}`);
-            const phoneNumbersCell = document.getElementById(`phone_numbers-${escapedEmail}`);
-            const addressCell = document.getElementById(`address-${escapedEmail}`);
-            const dobCell = document.getElementById(`dob-${escapedEmail}`);
-            const validmailResultsCell = document.getElementById(`validmail_results-${escapedEmail}`);
-
-            if (statusCell) statusCell.textContent = result.status || 'Autodoxed';
-            if (nameCell) nameCell.textContent = result.name || 'N/A';
-            if (phoneNumbersCell) phoneNumbersCell.textContent = result.phone_numbers ? result.phone_numbers.join(', ') : 'N/A';
-            if (addressCell) addressCell.textContent = result.address || 'N/A';
-            if (dobCell) dobCell.textContent = result.dob || 'N/A';
-
-            if (validmailResultsCell) {
+            // Get table cells by index (since we don't have specific IDs)
+            const cells = row.querySelectorAll('td');
+            
+            // Update status (3rd column, index 2)
+            if (cells[2]) {
+                const statusBadge = getStatusBadge(result.status || 'pending');
+                cells[2].innerHTML = statusBadge;
+            }
+            
+            // Update name (4th column, index 3)
+            if (cells[3]) {
+                const nameDisplay = result.name || 'N/A';
+                cells[3].innerHTML = `<div class="text-truncate" style="max-width: 150px;" title="${nameDisplay}">${nameDisplay === 'N/A' ? '<span class="text-muted">N/A</span>' : nameDisplay}</div>`;
+            }
+            
+            // Update phone numbers (5th column, index 4)
+            if (cells[4]) {
+                const phoneDisplay = result.phone_numbers ? 
+                    (Array.isArray(result.phone_numbers) ? result.phone_numbers.join(', ') : result.phone_numbers) :
+                    'N/A';
+                cells[4].innerHTML = `<div class="text-truncate" style="max-width: 150px;" title="${phoneDisplay}">${phoneDisplay === 'N/A' ? '<span class="text-muted">N/A</span>' : phoneDisplay}</div>`;
+            }
+            
+            // Update address (6th column, index 5)
+            if (cells[5]) {
+                const addresses = result.addresses_list && result.addresses_list.length > 0 ? result.addresses_list : [result.address || 'N/A'];
+                const addressDisplay = addresses.length > 0 ? 
+                    addresses.slice(0, 1).map(address => 
+                        `<div class="text-truncate" style="max-width: 200px;" title="${address}">${address}</div>`
+                    ).join('') + (addresses.length > 1 ? `<small class="text-muted">+${addresses.length - 1} more</small>` : '') :
+                    '<span class="text-muted">N/A</span>';
+                cells[5].innerHTML = addressDisplay;
+            }
+            
+            // Update DOB (7th column, index 6)
+            if (cells[6]) {
+                const dobDisplay = result.dob || 'N/A';
+                cells[6].innerHTML = `<div class="text-truncate" style="max-width: 100px;" title="${dobDisplay}">${dobDisplay === 'N/A' ? '<span class="text-muted">N/A</span>' : dobDisplay}</div>`;
+            }
+            
+            // Update zestimate (8th column, index 7)
+            if (cells[7]) {
+                const zestimates = result.zestimate_values && result.zestimate_values.length > 0 ? result.zestimate_values : [null];
+                const zestimateDisplay = zestimates.length > 0 && zestimates[0] !== null && zestimates[0] !== undefined && zestimates[0] !== 'None' ? 
+                    `<span class="text-success fw-bold">$${zestimates[0].toLocaleString()}</span>` + 
+                    (zestimates.length > 1 ? `<br><small class="text-muted">+${zestimates.length - 1} more</small>` : '') :
+                    '<span class="text-muted">N/A</span>';
+                cells[7].innerHTML = zestimateDisplay;
+            }
+            
+            // Update alternative names (9th column, index 8)
+            if (cells[8]) {
+                const altNamesDisplay = result.alternative_names && result.alternative_names.length > 0 ?
+                    result.alternative_names.slice(0, 2).join(', ') + (result.alternative_names.length > 2 ? ` +${result.alternative_names.length - 2} more` : '') : 
+                    'N/A';
+                cells[8].innerHTML = `<div class="text-truncate" style="max-width: 150px;" title="${altNamesDisplay}">${altNamesDisplay === 'N/A' ? '<span class="text-muted">N/A</span>' : altNamesDisplay}</div>`;
+            }
+            
+            // Update validation results (10th column, index 9)
+            if (cells[9]) {
                 if (result.validmail_results) {
                     const formattedValidmailResults = Object.entries(result.validmail_results).map(([module, result]) => {
-                        return `<strong>${module}</strong>: ${result ? 'Valid' : 'Invalid'}`;
-                    }).join('<br>');
-                    validmailResultsCell.innerHTML = formattedValidmailResults;
+                        const badgeClass = result ? 'bg-success' : 'bg-danger';
+                        return `<span class="badge ${badgeClass} me-1 mb-1">${module}: ${result ? 'Valid' : 'Invalid'}</span>`;
+                    }).join('');
+                    cells[9].innerHTML = `<div style="max-width: 200px;">${formattedValidmailResults}</div>`;
                 } else {
-                    validmailResultsCell.textContent = 'N/A';
+                    cells[9].innerHTML = '<span class="text-muted">Not checked</span>';
                 }
             }
 

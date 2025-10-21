@@ -11,6 +11,9 @@
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   </head>
   <body>
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 10000;"></div>
+
     <div id="overlay" class="overlay">
         <div class="message">Loading, please wait...</div>
         <div class="spinner"></div>
@@ -29,26 +32,60 @@
         <button id="close-panel-btn" class="btn btn-danger w-100">Close</button>
       </div>
     </div>
-    <div class="sidebar">
-      <h3>Email Dashboard</h3>
-      <ul>
-        <li><a href="#" data-bs-toggle="modal" data-bs-target="#filterModal"><i class="fas fa-filter"></i> Filters</a></li>
-        <li><a href="#" data-bs-toggle="modal" data-bs-target="#uploadModal"><i class="fas fa-upload"></i> Upload Emails</a></li>
-        <li><a href="#" id="perform-search-btn" data-bs-toggle="modal" data-bs-target="#searchModal"><i class="fas fa-search"></i> Perform Lookup</a></li>
-        <li><a href="#" onclick="performRecoveryCheck()"><i class="fas fa-sync-alt"></i> Recovery Check</a></li>
-        <li><a href="#" id="perform-validmailcheck-btn" data-bs-toggle="modal" data-bs-target="#validMailModal"><i class="fas fa-envelope"></i> ValidMail Check</a></li>
-        <li><a href="#" id="export-csv-btn"><i class="fas fa-file-export"></i> Export</a></li>
-        <li><a href="#" data-bs-toggle="modal" data-bs-target="#deleteModal"><i class="fas fa-trash"></i> Delete Records</a></li>
-        <li><a href="#" data-bs-toggle="modal" data-bs-target="#settingsModal" onclick="loadSettings()"><i class="fas fa-cogs"></i> Settings</a></li>
-        <li><a href="{{ url_for('auth.logout') }}"><i class="fas fa-sign-out-alt"></i> Logout</a></li>
+    <!-- Mobile Menu Toggle -->
+    <button id="mobile-menu-toggle" class="btn btn-primary d-lg-none position-fixed" style="top: 1rem; left: 1rem; z-index: 1001;">
+      <i class="fas fa-bars"></i>
+    </button>
 
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-header d-flex justify-content-between align-items-center">
+        <h3><i class="fas fa-envelope-open-text me-2"></i>AIO-Suite</h3>
+        <button id="sidebar-close" class="btn btn-link text-white d-lg-none">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <ul>
+        <li class="nav-section">
+          <span class="nav-section-title">Data Management</span>
+        </li>
+        <li><a href="#" data-bs-toggle="modal" data-bs-target="#uploadModal"><i class="fas fa-upload"></i> Upload Emails</a></li>
+        <li><a href="#" data-bs-toggle="modal" data-bs-target="#filterModal"><i class="fas fa-filter"></i> Advanced Filters</a></li>
+        <li><a href="#" id="export-csv-btn"><i class="fas fa-file-export"></i> Export Data</a></li>
+        
+        <li class="nav-section">
+          <span class="nav-section-title">Processing</span>
+        </li>
+        <li><a href="#" id="perform-search-btn" data-bs-toggle="modal" data-bs-target="#searchModal"><i class="fas fa-search"></i> Perform Lookup</a></li>
+        <li><a href="#" id="perform-validmailcheck-btn" data-bs-toggle="modal" data-bs-target="#validMailModal"><i class="fas fa-envelope-check"></i> ValidMail Check</a></li>
+        <li><a href="#" onclick="performRecoveryCheck()"><i class="fas fa-sync-alt"></i> Recovery Check</a></li>
+        
+        <li class="nav-section">
+          <span class="nav-section-title">System</span>
+        </li>
+        <li><a href="#" data-bs-toggle="modal" data-bs-target="#settingsModal" onclick="loadSettings()"><i class="fas fa-cogs"></i> Settings</a></li>
+        <li><a href="#" data-bs-toggle="modal" data-bs-target="#deleteModal"><i class="fas fa-trash-alt"></i> Delete Records</a></li>
+        <li><a href="#" onclick="toggleDarkMode()"><i class="fas fa-moon" id="theme-icon"></i> <span id="theme-text">Dark Mode</span></a></li>
+        <li><a href="{{ url_for('auth.logout') }}"><i class="fas fa-sign-out-alt"></i> Logout</a></li>
       </ul>
     </div>
 
     <div class="content">
-      <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2>Dashboard</h2>
-        <span id="total-records"></span>
+      <div class="dashboard-header">
+        <div class="dashboard-title">
+          <h1><i class="fas fa-tachometer-alt me-3"></i>Email Intelligence Dashboard</h1>
+          <p class="dashboard-subtitle">Comprehensive email analysis and data processing platform</p>
+        </div>
+        <div class="dashboard-stats">
+          <div class="stat-card">
+            <div class="stat-icon">
+              <i class="fas fa-envelope"></i>
+            </div>
+            <div class="stat-content">
+              <span class="stat-number" id="total-records">0</span>
+              <span class="stat-label">Total Records</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div id="stats-panel" class="card p-3 mb-3" style="display: none;">
@@ -84,28 +121,41 @@
         </div>
       </div>
 
-      <div class="card p-3 mb-3">
-        <table class="table table-bordered table-striped">
-          <thead>
-            <tr>
-              <th><input type="checkbox" id="select_all" onclick="toggleSelectAll()"></th>
-              <th>Email</th>
-              <th>Status</th>
-              <th>Name</th>
-              <th>Numbers</th>
-              <th>Address</th>
-              <th>DOB</th>
-              <th>VM Results</th>
-            </tr>
-          </thead>
-          <tbody id="email-table-body"></tbody>
-        </table>
+      <div class="card mb-4">
+        <div class="card-header">
+          <div class="d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="fas fa-table me-2"></i>Email Records</h5>
+            <div class="d-flex align-items-center gap-2">
+              <div class="form-check">
+                <input type="checkbox" class="form-check-input" id="execute-all">
+                <label class="form-check-label" for="execute-all">Execute All</label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-hover mb-0">
+              <thead>
+                <tr>
+                  <th width="50"><input type="checkbox" id="select_all" onclick="toggleSelectAll()"></th>
+                  <th>Email Address</th>
+                  <th width="120">Status</th>
+                  <th>Full Name</th>
+                  <th>Phone Numbers</th>
+                  <th>Address</th>
+                  <th>Date of Birth</th>
+                  <th>Property Value</th>
+                  <th>Alternative Names</th>
+                  <th>Validation Results</th>
+                </tr>
+              </thead>
+              <tbody id="email-table-body"></tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
-      <div class="form-check mb-3">
-        <input type="checkbox" class="form-check-input" id="execute-all">
-        <label class="form-check-label" for="execute-all">Execute All</label>
-      </div>
 
       <nav>
         <ul class="pagination" id="pagination"></ul>
@@ -113,58 +163,118 @@
     </div>
 
     <div class="modal fade" id="filterModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-xl">
           <div class="modal-content">
             <div class="modal-header">
-              <h5 class="modal-title">Advanced Filters</h5>
+              <h5 class="modal-title"><i class="fas fa-filter me-2"></i>Advanced Filters</h5>
               <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
               <form id="filter-form">
                 <div class="row">
-                  <div class="col-md-6">
-                    <div class="card mb-3">
-                      <div class="card-header">Basic Filters</div>
+                  <div class="col-lg-6">
+                    <div class="card mb-4">
+                      <div class="card-header">
+                        <h6 class="mb-0"><i class="fas fa-search me-2"></i>Basic Filters</h6>
+                      </div>
                       <div class="card-body">
                         <div class="mb-3">
-                          <label for="filter-domain" class="form-label">Domain</label>
-                          <input type="text" id="filter-domain" name="domain" placeholder="e.g. gmail.com" class="form-control">
+                          <label for="filter-domain" class="form-label">Domain Filter</label>
+                          <input type="text" id="filter-domain" name="domain" placeholder="e.g. gmail.com, outlook.com" class="form-control">
+                          <small class="text-muted">Filter by email domain</small>
                         </div>
                         <div class="mb-3">
-                          <label for="status-filter" class="form-label">Status</label>
+                          <label for="status-filter" class="form-label">Status Filter</label>
                           <select id="status-filter" class="form-control">
                             <option value="">-- All Statuses --</option>
                           </select>
+                          <small class="text-muted">Filter by processing status</small>
                         </div>
                       </div>
                     </div>
                     
-                    <div class="card mb-3">
-                      <div class="card-header">Data Presence</div>
+                    <div class="card mb-4">
+                      <div class="card-header">
+                        <h6 class="mb-0"><i class="fas fa-database me-2"></i>Data Presence</h6>
+                      </div>
                       <div class="card-body">
-                        <div class="form-check mb-2">
-                          <input class="form-check-input" type="checkbox" id="has-name">
-                          <label class="form-check-label" for="has-name">Has Name</label>
+                        <div class="row">
+                          <div class="col-md-6">
+                            <div class="form-check mb-3">
+                              <input class="form-check-input" type="checkbox" id="has-name">
+                              <label class="form-check-label" for="has-name">
+                                <i class="fas fa-user me-1"></i>Has Name
+                              </label>
+                            </div>
+                            <div class="form-check mb-3">
+                              <input class="form-check-input" type="checkbox" id="has-phone">
+                              <label class="form-check-label" for="has-phone">
+                                <i class="fas fa-phone me-1"></i>Has Phone Numbers
+                              </label>
+                            </div>
+                            <div class="form-check mb-3">
+                              <input class="form-check-input" type="checkbox" id="has-address">
+                              <label class="form-check-label" for="has-address">
+                                <i class="fas fa-map-marker-alt me-1"></i>Has Address
+                              </label>
+                            </div>
+                            <div class="form-check mb-3">
+                              <input class="form-check-input" type="checkbox" id="has-dob">
+                              <label class="form-check-label" for="has-dob">
+                                <i class="fas fa-calendar me-1"></i>Has Date of Birth
+                              </label>
+                            </div>
+                          </div>
+                          <div class="col-md-6">
+                            <div class="form-check mb-3">
+                              <input class="form-check-input" type="checkbox" id="has-zestimate">
+                              <label class="form-check-label" for="has-zestimate">
+                                <i class="fas fa-home me-1"></i>Has Property Value
+                              </label>
+                            </div>
+                            <div class="form-check mb-3">
+                              <input class="form-check-input" type="checkbox" id="has-alternative-names">
+                              <label class="form-check-label" for="has-alternative-names">
+                                <i class="fas fa-tags me-1"></i>Has Alternative Names
+                              </label>
+                            </div>
+                            <div class="form-check mb-3">
+                              <input class="form-check-input" type="checkbox" id="has-multiple-addresses">
+                              <label class="form-check-label" for="has-multiple-addresses">
+                                <i class="fas fa-map-marked-alt me-1"></i>Has Multiple Addresses
+                              </label>
+                            </div>
+                          </div>
                         </div>
-                        <div class="form-check mb-2">
-                          <input class="form-check-input" type="checkbox" id="has-phone">
-                          <label class="form-check-label" for="has-phone">Has Phone Numbers</label>
-                        </div>
-                        <div class="form-check mb-2">
-                          <input class="form-check-input" type="checkbox" id="has-address">
-                          <label class="form-check-label" for="has-address">Has Address</label>
-                        </div>
-                        <div class="form-check mb-2">
-                          <input class="form-check-input" type="checkbox" id="has-dob">
-                          <label class="form-check-label" for="has-dob">Has Date of Birth</label>
+                      </div>
+                    </div>
+                    
+                    <div class="card mb-4">
+                      <div class="card-header">
+                        <h6 class="mb-0"><i class="fas fa-dollar-sign me-2"></i>Property Value Range</h6>
+                      </div>
+                      <div class="card-body">
+                        <div class="row">
+                          <div class="col-md-6">
+                            <label for="zestimate-min" class="form-label">Minimum Value ($)</label>
+                            <input type="number" id="zestimate-min" name="zestimate_min" placeholder="e.g. 100000" class="form-control">
+                            <small class="text-muted">Minimum property value</small>
+                          </div>
+                          <div class="col-md-6">
+                            <label for="zestimate-max" class="form-label">Maximum Value ($)</label>
+                            <input type="number" id="zestimate-max" name="zestimate_max" placeholder="e.g. 500000" class="form-control">
+                            <small class="text-muted">Maximum property value</small>
+                          </div>
                         </div>
                       </div>
                     </div>
                   </div>
                   
-                  <div class="col-md-6">
-                    <div class="card mb-3">
-                      <div class="card-header">ValidMail Results</div>
+                  <div class="col-lg-6">
+                    <div class="card mb-4">
+                      <div class="card-header">
+                        <h6 class="mb-0"><i class="fas fa-envelope-check me-2"></i>ValidMail Results</h6>
+                      </div>
                       <div class="card-body">
                         <div class="mb-3">
                           <label class="form-label">Validation Status</label>
@@ -176,6 +286,7 @@
                             <option value="all-valid">All valid</option>
                             <option value="all-invalid">All invalid</option>
                           </select>
+                          <small class="text-muted">Filter by validation status</small>
                         </div>
                         <div class="mb-3">
                           <label for="vm-module-filter" class="form-label">Specific VM Modules</label>
@@ -190,15 +301,20 @@
                             <option value="valid">Valid</option>
                             <option value="invalid">Invalid</option>
                           </select>
+                          <small class="text-muted">Filter by specific module results</small>
                         </div>
                       </div>
                     </div>
                   </div>
                 </div>
                 
-                <div class="d-grid gap-2 mt-3">
-                  <button type="button" class="btn btn-primary" onclick="applyFilters()">Apply Filters</button>
-                  <button type="button" class="btn btn-secondary" onclick="resetFilters()">Reset Filters</button>
+                <div class="d-flex gap-3 mt-4 justify-content-end">
+                  <button type="button" class="btn btn-secondary" onclick="resetFilters()">
+                    <i class="fas fa-undo me-2"></i>Reset Filters
+                  </button>
+                  <button type="button" class="btn btn-primary" onclick="applyFilters()">
+                    <i class="fas fa-filter me-2"></i>Apply Filters
+                  </button>
                 </div>
               </form>
             </div>
@@ -249,7 +365,7 @@
     </div>
 
     <div class="modal fade" id="settingsModal" tabindex="-1" aria-hidden="true">
-      <div class="modal-dialog">
+      <div class="modal-dialog modal-lg">
         <div class="modal-content">
           <div class="modal-header">
             <h5 class="modal-title">Settings</h5>
@@ -269,20 +385,49 @@
     </div>
 
     <div class="modal fade" id="uploadModal" tabindex="-1" aria-hidden="true">
-      <div class="modal-dialog">
+      <div class="modal-dialog modal-lg">
         <div class="modal-content">
           <div class="modal-header">
-            <h5 class="modal-title">Upload Emails</h5>
+            <h5 class="modal-title"><i class="fas fa-upload me-2"></i>Upload Email List</h5>
             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
           </div>
           <div class="modal-body">
-            <div id="drop-area" class="border p-4 text-center">
-              <p>Drag and drop your email file here, or click to select a file</p>
-              <input type="file" id="email_file" name="email_file" class="form-control d-none" accept=".csv, .txt" required>
+            <div class="row">
+              <div class="col-md-6">
+                <div id="drop-area" class="border border-2 border-dashed rounded p-5 text-center mb-4" style="border-color: var(--primary-color) !important;">
+                  <i class="fas fa-cloud-upload-alt fa-3x text-primary mb-3"></i>
+                  <h6 class="mb-2">Drag & Drop Files Here</h6>
+                  <p class="text-muted mb-3">or click to browse files</p>
+                  <input type="file" id="email_file" name="email_file" class="form-control d-none" accept=".csv, .txt" required>
+                  <button type="button" class="btn btn-outline-primary" onclick="document.getElementById('email_file').click()">
+                    <i class="fas fa-folder-open me-2"></i>Choose File
+                  </button>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="card">
+                  <div class="card-header">
+                    <h6 class="mb-0"><i class="fas fa-info-circle me-2"></i>File Requirements</h6>
+                  </div>
+                  <div class="card-body">
+                    <ul class="list-unstyled mb-0">
+                      <li class="mb-2"><i class="fas fa-check text-success me-2"></i>Supported formats: .txt, .csv</li>
+                      <li class="mb-2"><i class="fas fa-check text-success me-2"></i>One email per line</li>
+                      <li class="mb-2"><i class="fas fa-check text-success me-2"></i>Valid email format required</li>
+                      <li class="mb-0"><i class="fas fa-check text-success me-2"></i>Duplicate emails will be skipped</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div id="file-name-display" class="mt-3" style="display: none;">
-              <p><strong>Selected File:</strong> <span id="file-name"></span></p>
+            <div id="file-name-display" class="mt-4" style="display: none;">
+              <div class="alert alert-info d-flex align-items-center">
+                <i class="fas fa-file-alt me-3"></i>
+                <div>
+                  <strong>Selected File:</strong> <span id="file-name"></span>
+                </div>
+              </div>
             </div>
 
             <form action="/upload" method="post" enctype="multipart/form-data" class="fade-in mt-3" id="upload-form">
@@ -290,7 +435,11 @@
                 <label for="email_file" class="form-label">Upload Email List</label>
                 <input type="file" class="form-control" id="email-input" name="email_file" required style="display: none;">
               </div>
-              <button type="submit" class="btn btn-primary" id="upload-btn" style="display: none;">Upload Emails</button>
+              <div class="d-flex justify-content-end">
+                <button type="submit" class="btn btn-primary" id="upload-btn" style="display: none;">
+                  <i class="fas fa-upload me-2"></i>Upload Emails
+                </button>
+              </div>
             </form>
           </div>
         </div>
@@ -298,32 +447,52 @@
     </div>
 
     <div class="modal fade" id="validMailModal" tabindex="-1" aria-hidden="true">
-      <div class="modal-dialog">
+      <div class="modal-dialog modal-lg">
         <div class="modal-content">
           <div class="modal-header">
-            <h5 class="modal-title">ValidMail Modules</h5>
+            <h5 class="modal-title"><i class="fas fa-envelope-check me-2"></i>ValidMail Check</h5>
             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
           </div>
-          <div class="modal-body" id="validmail-module-selection-body"></div>
+          <div class="modal-body">
+            <div class="alert alert-info">
+              <i class="fas fa-info-circle me-2"></i>
+              <strong>ValidMail Check:</strong> Verify email addresses using multiple validation services.
+            </div>
+            <div id="validmail-module-selection-body"></div>
+          </div>
           <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-            <button type="button" class="btn btn-primary" id="validmail-modal-submit-btn">Perform ValidMail Check</button>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+              <i class="fas fa-times me-2"></i>Cancel
+            </button>
+            <button type="button" class="btn btn-primary" id="validmail-modal-submit-btn">
+              <i class="fas fa-envelope-check me-2"></i>Perform ValidMail Check
+            </button>
           </div>
         </div>
       </div>
     </div>
 
     <div class="modal fade" id="searchModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-lg">
           <div class="modal-content">
             <div class="modal-header">
-              <h5 class="modal-title">Search Modules</h5>
+              <h5 class="modal-title"><i class="fas fa-search me-2"></i>Email Lookup</h5>
               <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body" id="search-module-selection-body"></div>
+            <div class="modal-body">
+              <div class="alert alert-info">
+                <i class="fas fa-info-circle me-2"></i>
+                <strong>Email Lookup:</strong> Search for personal information associated with email addresses.
+              </div>
+              <div id="search-module-selection-body"></div>
+            </div>
             <div class="modal-footer">
-              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-              <button type="button" class="btn btn-primary" id="search-modal-submit-btn">Perform Search</button>
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                <i class="fas fa-times me-2"></i>Cancel
+              </button>
+              <button type="button" class="btn btn-primary" id="search-modal-submit-btn">
+                <i class="fas fa-search me-2"></i>Perform Search
+              </button>
             </div>
           </div>
         </div>

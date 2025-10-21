@@ -1,5 +1,5 @@
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy.ext.mutable import MutableDict
+from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlalchemy import JSON
 from flask_login import UserMixin
 from flask_bcrypt import generate_password_hash, check_password_hash
@@ -32,6 +32,13 @@ class Email(db.Model):
     dob = db.Column(db.String(100))
     name = db.Column(db.String(100))
     validmail_results = db.Column(MutableDict.as_mutable(JSON), default={})
+    
+    # New columns for enhanced SearchAPI data
+    addresses_list = db.Column(MutableList.as_mutable(JSON), default=[])  # Multiple addresses
+    addresses_structured = db.Column(MutableList.as_mutable(JSON), default=[])  # Structured address data
+    zestimate_values = db.Column(MutableList.as_mutable(JSON), default=[])  # Zestimate values for each address
+    property_details = db.Column(MutableList.as_mutable(JSON), default=[])  # Property details for each address
+    alternative_names = db.Column(MutableList.as_mutable(JSON), default=[])  # Alternative names
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert email record to dictionary."""
@@ -44,7 +51,12 @@ class Email(db.Model):
             'address': self.address or 'N/A',
             'dob': self.dob or 'N/A',
             'name': self.name or 'N/A',
-            'validmail_results': self.validmail_results or {}
+            'validmail_results': self.validmail_results or {},
+            'addresses_list': self.addresses_list or [],
+            'addresses_structured': self.addresses_structured or [],
+            'zestimate_values': self.zestimate_values or [],
+            'property_details': self.property_details or [],
+            'alternative_names': self.alternative_names or []
         }
 
     def update_autodoxed(self, phone_numbers: List[str]) -> None:
@@ -72,6 +84,17 @@ class Email(db.Model):
             self.validmail_results = {}
         
         self.validmail_results[module_name] = result
+        db.session.commit()
+    
+    def update_searchapi_data(self, addresses_list: List[str], addresses_structured: List[Dict], 
+                             zestimate_values: List[int], property_details: List[Dict], 
+                             alternative_names: List[str]) -> None:
+        """Update email with enhanced SearchAPI data."""
+        self.addresses_list = addresses_list
+        self.addresses_structured = addresses_structured
+        self.zestimate_values = zestimate_values
+        self.property_details = property_details
+        self.alternative_names = alternative_names
         db.session.commit()
         
 class Settings(db.Model):

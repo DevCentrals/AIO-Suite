@@ -593,10 +593,14 @@ def process_email_for_validmail_check(app, email, loaded_modules, selected_modul
                         if email:
                             email.update_validmail_results(module_name, is_valid_mail)
                             db.session.commit()
+                        
+                        result_status = "VALID" if is_valid_mail else "INVALID"
+                        print(f"[{module_name}] - {task_obj['email']}: {result_status}")
 
                     break
                 except Exception as error:
                     proxy_retry_count += 1
+                    print(f"[{module_name}] - Attempt {proxy_retry_count}/{max_retries} failed for {task_obj['email']}: {str(error)}")
                     if proxy_retry_count >= max_retries:
                         print(f"Failed after {max_retries} retries for {task_obj['email']} with {module_name}")
 
@@ -755,7 +759,9 @@ def process_email_for_lookup(app, email: str, proxies: List[str], settings: Dict
                                 result.data.get('name'),
                                 result.data.get('address'),
                                 result.data.get('dob'),
-                                result.data.get('phone_numbers')
+                                result.data.get('phone_numbers'),
+                                result.data.get('addresses_list'),
+                                result.data.get('alternative_names')
                             ])
                             if has_data:
                                 results.append(result.data)
@@ -777,8 +783,12 @@ def process_email_for_lookup(app, email: str, proxies: List[str], settings: Dict
                     for key, value in result.items():
                         if key not in merged_result or not merged_result[key]:
                             merged_result[key] = value
-                        elif isinstance(value, list) and key == 'phone_numbers':
+                        elif isinstance(value, list) and key in ['phone_numbers', 'addresses_list', 'alternative_names']:
                             merged_result[key] = list(set(merged_result[key] + value))
+                        elif isinstance(value, list) and key in ['addresses_structured', 'zestimate_values', 'property_details']:
+                            # For structured data, prefer non-empty values
+                            if value and any(v for v in value if v):
+                                merged_result[key] = value
                         elif isinstance(value, str) and isinstance(merged_result[key], str):
                             if value and not merged_result[key]:
                                 merged_result[key] = value
@@ -819,10 +829,24 @@ def process_email_for_lookup(app, email: str, proxies: List[str], settings: Dict
                     if merged_result.get('phone_numbers'):
                         update_data['phone_numbers'] = "; ".join(merged_result['phone_numbers'])
                     
+                    # Handle enhanced SearchAPI data
+                    if merged_result.get('addresses_list'):
+                        update_data['addresses_list'] = merged_result['addresses_list']
+                    if merged_result.get('addresses_structured'):
+                        update_data['addresses_structured'] = merged_result['addresses_structured']
+                    if merged_result.get('zestimate_values'):
+                        update_data['zestimate_values'] = merged_result['zestimate_values']
+                    if merged_result.get('property_details'):
+                        update_data['property_details'] = merged_result['property_details']
+                    if merged_result.get('alternative_names'):
+                        update_data['alternative_names'] = merged_result['alternative_names']
+                    
                     if update_data:
                         update_data['status'] = "Searched"
+                        print(f"Updating database for {email} with data: {update_data}")
                         db.session.query(Email).filter_by(email=email).update(update_data)
                         db.session.commit()
+                        print(f"Successfully updated database for {email}")
                 except Exception as e:
                     print(f"Error saving to database for {email}: {e}")
                     db.session.rollback()
@@ -843,7 +867,12 @@ def process_email_for_lookup(app, email: str, proxies: List[str], settings: Dict
                 'validmail_results': validmail_results,
                 'status': 'Searched',
                 'success': bool(results),
-                'processed_modules': selected_modules
+                'processed_modules': selected_modules,
+                'addresses_list': merged_result.get('addresses_list', []),
+                'addresses_structured': merged_result.get('addresses_structured', []),
+                'zestimate_values': merged_result.get('zestimate_values', []),
+                'property_details': merged_result.get('property_details', []),
+                'alternative_names': merged_result.get('alternative_names', [])
             }
             
             socketio.emit('email_result', result_to_emit)
@@ -889,6 +918,50 @@ def get_emails():
         query = query.filter(Email.address != None, Email.address != '', Email.address != 'N/A')
     if filters.get('has_dob'):
         query = query.filter(Email.dob != None, Email.dob != '', Email.dob != 'N/A')
+    
+    # Filter by zestimate values
+    if filters.get('has_zestimate'):
+        query = query.filter(Email.zestimate_values != None, Email.zestimate_values != '[]')
+    
+    if filters.get('zestimate_min'):
+        try:
+            min_value = int(filters['zestimate_min'])
+            print(f"DEBUG - Applying zestimate_min filter: {min_value}")
+            # Check if any zestimate value meets the minimum criteria
+            # Use OR conditions to check each array element
+            conditions = []
+            for i in range(10):  # Check up to 10 elements
+                conditions.append(
+                    func.json_extract(Email.zestimate_values, f'$[{i}]').cast(db.Integer) >= min_value
+                )
+            query = query.filter(db.or_(*conditions))
+            print(f"DEBUG - Zestimate filter applied, checking {len(conditions)} array elements")
+        except (ValueError, TypeError):
+            pass
+    
+    if filters.get('zestimate_max'):
+        try:
+            max_value = int(filters['zestimate_max'])
+            print(f"DEBUG - Applying zestimate_max filter: {max_value}")
+            # Check if any zestimate value meets the maximum criteria
+            # Use OR conditions to check each array element
+            conditions = []
+            for i in range(10):  # Check up to 10 elements
+                conditions.append(
+                    func.json_extract(Email.zestimate_values, f'$[{i}]').cast(db.Integer) <= max_value
+                )
+            query = query.filter(db.or_(*conditions))
+            print(f"DEBUG - Zestimate max filter applied, checking {len(conditions)} array elements")
+        except (ValueError, TypeError):
+            pass
+    
+    # Filter by alternative names
+    if filters.get('has_alternative_names'):
+        query = query.filter(Email.alternative_names != None, Email.alternative_names != '[]')
+    
+    # Filter by multiple addresses
+    if filters.get('has_multiple_addresses'):
+        query = query.filter(Email.addresses_list != None, Email.addresses_list != '[]')
 
     if filters.get('vm_status'):
         vm_status = filters['vm_status']
@@ -943,7 +1016,7 @@ def get_emails():
 
     statuses = db.session.query(Email.status).distinct().all()
     status_list = [status[0] for status in statuses]
-
+    
     result = {
         'records': [record.to_dict() for record in records],
         'total': total,
@@ -1319,6 +1392,7 @@ if __name__ == "__main__":
         
         default_settings = {
             'threads': '10',
+            'house_value': 'false',
         }
         
         print("Creating directories...")
@@ -1347,7 +1421,6 @@ if __name__ == "__main__":
                 if not Settings.query.filter_by(key=setting).first():
                     db.session.add(Settings(key=setting, value=""))
         
-        # Create default admin user if no users exist
         if not User.query.first():
             print("Creating default admin user...")
             admin_user = User(username='admin', email='admin@example.com')
