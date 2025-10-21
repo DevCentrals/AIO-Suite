@@ -18,7 +18,7 @@ This project is a web-based application designed to upload, process, and validat
 
 Before running the application, ensure you have the following:
 
-- Python 3.10.5
+- Python 3.14
 - Flask
 - Flask-SQLAlchemy
 - Flask-SocketIO
