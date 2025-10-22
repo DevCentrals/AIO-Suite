@@ -1,5 +1,4 @@
-// Cache bust: v7.0 - Clear address-zestimate pairing with numbered items
-const recordsPerPage = 250;
+const recordsPerPage = 50;
 let currentPage = 1;
 let totalRecords = 0;
 let currentFilters = {};
@@ -25,7 +24,6 @@ const emailInputField = document.getElementById("email-input");
 const fileNameDisplay = document.getElementById("file-name-display");
 const fileNameSpan = document.getElementById("file-name");
 
-// Status badge helper function
 function getStatusBadge(status) {
     const statusMap = {
         'pending': { class: 'bg-secondary', text: 'Pending' },
@@ -40,7 +38,6 @@ function getStatusBadge(status) {
     return `<span class="badge ${statusInfo.class}">${statusInfo.text}</span>`;
 }
 
-// Toast notification system
 function showToast(type, title, message, duration = 5000) {
     const toastContainer = document.getElementById('toast-container');
     const toastId = 'toast-' + Date.now();
@@ -75,13 +72,11 @@ function showToast(type, title, message, duration = 5000) {
     
     toast.show();
     
-    // Remove from DOM after hiding
     toastElement.addEventListener('hidden.bs.toast', () => {
         toastElement.remove();
     });
 }
 
-// Enhanced alert function using toasts
 function showAlert(type, message, title = null) {
     const titleMap = {
         'success': 'Success',
@@ -93,7 +88,6 @@ function showAlert(type, message, title = null) {
     showToast(type, title || titleMap[type], message);
 }
 
-// Loading button state management
 function setButtonLoading(button, loading = true) {
     if (loading) {
         button.disabled = true;
@@ -105,7 +99,6 @@ function setButtonLoading(button, loading = true) {
     }
 }
 
-// Enhanced progress tracking
 function updateProgressWithDetails(message, progress = null) {
     const progressMessageElem = document.getElementById('progress-message');
     if (progressMessageElem) {
@@ -121,7 +114,6 @@ function updateProgressWithDetails(message, progress = null) {
     }
 }
 
-// Dark mode functionality
 function toggleDarkMode() {
     const html = document.documentElement;
     const themeIcon = document.getElementById('theme-icon');
@@ -142,7 +134,6 @@ function toggleDarkMode() {
     }
 }
 
-// Initialize theme on page load
 function initializeTheme() {
     const savedTheme = localStorage.getItem('theme');
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -189,9 +180,7 @@ dropArea.addEventListener("click", () => {
     fileInput.click();
 });
 
-// File selection handler
 function handleFileSelection(file) {
-    // Validate file type
     const allowedTypes = ['text/plain', 'text/csv', 'application/csv'];
     const fileExtension = file.name.split('.').pop().toLowerCase();
     
@@ -200,11 +189,9 @@ function handleFileSelection(file) {
         return;
     }
     
-    // Create a new FileList-like object for both file inputs
     const dataTransfer = new DataTransfer();
     dataTransfer.items.add(file);
     
-    // Update both file inputs
     fileInput.files = dataTransfer.files;
     emailInputField.files = dataTransfer.files;
     
@@ -216,7 +203,6 @@ function handleFileSelection(file) {
 
 fileInput.addEventListener("change", () => {
     if (fileInput.files.length > 0) {
-        // Sync the hidden input with the visible one
         const dataTransfer = new DataTransfer();
         for (let i = 0; i < fileInput.files.length; i++) {
             dataTransfer.items.add(fileInput.files[i]);
@@ -227,7 +213,6 @@ fileInput.addEventListener("change", () => {
     }
 });
 
-// Mobile menu functionality
 document.getElementById('mobile-menu-toggle').addEventListener('click', function() {
     document.getElementById('sidebar').classList.add('open');
 });
@@ -236,7 +221,6 @@ document.getElementById('sidebar-close').addEventListener('click', function() {
     document.getElementById('sidebar').classList.remove('open');
 });
 
-// Close sidebar when clicking outside on mobile
 document.addEventListener('click', function(event) {
     const sidebar = document.getElementById('sidebar');
     const mobileToggle = document.getElementById('mobile-menu-toggle');
@@ -249,7 +233,6 @@ document.addEventListener('click', function(event) {
     }
 });
 
-// Panel functionality
 document.getElementById('open-panel-btn').addEventListener('click', function() {
     document.getElementById('module-panel').classList.add('open');
     this.style.display = 'none';
@@ -414,15 +397,17 @@ document.getElementById('validmail-modal-submit-btn').addEventListener('click', 
 document.getElementById('search-modal-submit-btn').addEventListener('click', performLookup);
 
 async function fetchRecords(page = 1, filters = currentFilters) {
-    try {
+        try {
+            if (page === 1) {
+                tableBody.innerHTML = '<tr><td colspan="8" class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></td></tr>';
+            }
+        
         const response = await fetch(`/get_emails?page=${page}&records_per_page=${recordsPerPage}&filters=${JSON.stringify(filters)}`);
         const data = await response.json();
 
         tableBody.innerHTML = data.records.map(record => {
-            // Format status with badge
             const statusBadge = getStatusBadge(record.status || 'pending');
 
-            // Format validmail results with badges
             const formattedValidmailResults = record.validmail_results ?
                 Object.entries(record.validmail_results).map(([module, result]) => {
                     const badgeClass = result ? 'bg-success' : 'bg-danger';
@@ -430,29 +415,24 @@ async function fetchRecords(page = 1, filters = currentFilters) {
                 }).join('') :
                 '<span class="text-muted">Not checked</span>';
 
-            // Format alternative names
             const altNamesDisplay = record.alternative_names && record.alternative_names.length > 0 ?
                 record.alternative_names.slice(0, 2).join(', ') + (record.alternative_names.length > 2 ? ` +${record.alternative_names.length - 2} more` : '') : 
                 'N/A';
 
-            // Format addresses and zestimates
             const addresses = record.addresses_list && record.addresses_list.length > 0 ? record.addresses_list : [record.address || 'N/A'];
             const zestimates = record.zestimate_values && record.zestimate_values.length > 0 ? record.zestimate_values : [null];
             
-            // Format addresses display
             const addressDisplay = addresses.length > 0 ? 
                 addresses.slice(0, 1).map(address => 
                     `<div class="text-truncate" style="max-width: 200px;" title="${address}">${address}</div>`
                 ).join('') + (addresses.length > 1 ? `<small class="text-muted">+${addresses.length - 1} more</small>` : '') :
                 '<span class="text-muted">N/A</span>';
             
-            // Format zestimates display
             const zestimateDisplay = zestimates.length > 0 && zestimates[0] !== null && zestimates[0] !== undefined && zestimates[0] !== 'None' ? 
                 `<span class="text-success fw-bold">$${zestimates[0].toLocaleString()}</span>` + 
                 (zestimates.length > 1 ? `<br><small class="text-muted">+${zestimates.length - 1} more</small>` : '') :
                 '<span class="text-muted">N/A</span>';
 
-            // Format phone numbers
             const phoneDisplay = record.phone_numbers ? 
                 (Array.isArray(record.phone_numbers) ? record.phone_numbers.join(', ') : record.phone_numbers) :
                 '<span class="text-muted">N/A</span>';
@@ -476,7 +456,6 @@ async function fetchRecords(page = 1, filters = currentFilters) {
         totalRecordsElem.textContent = totalRecords;
         updatePagination();
         populateStatusOptions(data.statuses);
-        // Only populate module filters if elements exist
         if (document.getElementById('module-filter') && document.getElementById('vm-module-filter')) {
             populateModuleFilter();
         }
@@ -625,7 +604,6 @@ async function showExportFormatModal() {
 }
 
 async function prepareAndSaveExport() {
-    // Show loading indicator
     const loadingIndicator = document.createElement('div');
     loadingIndicator.textContent = 'Preparing export...';
     loadingIndicator.style.position = 'fixed';
@@ -639,7 +617,6 @@ async function prepareAndSaveExport() {
     document.body.appendChild(loadingIndicator);
 
     try {
-        // Fetch records
         const records = await getFilteredRecords();
         
         if (records.length === 0) {
@@ -647,7 +624,6 @@ async function prepareAndSaveExport() {
             return;
         }
 
-        // Prepare file content
         const format = document.getElementById('exportFormat').value;
         const columnElements = Array.from(document.getElementById('sortableColumns').children);
 
@@ -663,7 +639,6 @@ async function prepareAndSaveExport() {
         const separator = format === 'tsv' ? '\t' : format === 'csv' ? ',' : ' | ';
         const rows = [];
         
-        // Prepare headers
         const headers = selectedColumns.map(col => {
             switch (col) {
                 case 'name': return 'Full Name';
@@ -674,12 +649,10 @@ async function prepareAndSaveExport() {
         });
         rows.push(headers.join(separator));
 
-        // Process each record
         records.forEach((record, index) => {
             const row = selectedColumns.map(col => {
                 let value = record[col] || 'N/A';
                 
-                // Format specific fields
                 if (col === 'phone_numbers') {
                     value = Array.isArray(value) ? 
                         value.join('; ').replace(/\r?\n|\r/g, ' ') : 
@@ -690,19 +663,17 @@ async function prepareAndSaveExport() {
                         .join('; ') : 'N/A';
                 }
 
-                // Clean up the value
                 value = value.toString()
-                    .replace(/\r?\n|\r/g, ' ')  // Replace newlines with spaces
-                    .replace(/\s+/g, ' ')        // Collapse multiple spaces
-                    .trim();                     // Trim whitespace
+                    .replace(/\r?\n|\r/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
 
-                // Handle CSV escaping
                 if (format === 'csv') {
                     if (value.includes('"')) {
-                        value = value.replace(/"/g, '""'); // Escape double quotes
+                        value = value.replace(/"/g, '""');
                     }
                     if (value.includes(',')) {
-                        value = `"${value}"`; // Wrap in quotes if contains separator
+                        value = `"${value}"`;
                     }
                 }
 
@@ -715,14 +686,12 @@ async function prepareAndSaveExport() {
         const fileType = format === 'csv' ? 'text/csv' : 'text/plain';
         const fileExtension = format === 'csv' ? 'csv' : format === 'tsv' ? 'tsv' : 'txt';
 
-        // Prompt user to confirm file save
         const confirmSave = confirm(`Export data is ready (${records.length} records). Click OK to save as ${fileExtension.toUpperCase()} file.`);
         if (!confirmSave) {
             alert('Export canceled.');
             return;
         }
 
-        // Save file
         try {
             if ('showSaveFilePicker' in window) {
                 const fileHandle = await window.showSaveFilePicker({
@@ -736,7 +705,6 @@ async function prepareAndSaveExport() {
                 await writableStream.write(fileContent);
                 await writableStream.close();
             } else {
-                // Fallback for browsers without File System Access API
                 const blob = new Blob([fileContent], { type: `${fileType};charset=utf-8;` });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -760,7 +728,6 @@ async function prepareAndSaveExport() {
             }
         }
     } finally {
-        // Remove loading indicator
         document.body.removeChild(loadingIndicator);
     }
 }
@@ -821,14 +788,12 @@ function initializeDragAndDrop() {
 }
 
 async function executeExport() {
-    // Fetch records
     const records = await getFilteredRecords();
     if (records.length === 0) {
         alert('No records to export!');
         return;
     }
 
-    // Get export settings
     const format = document.getElementById('exportFormat').value;
     const columnElements = Array.from(document.getElementById('sortableColumns').children);
 
@@ -844,7 +809,6 @@ async function executeExport() {
     const separator = format === 'tsv' ? '\t' : format === 'csv' ? ',' : ' | ';
     const rows = [];
     
-    // Prepare headers
     const headers = selectedColumns.map(col => {
         switch (col) {
             case 'name': return 'Full Name';
@@ -855,12 +819,10 @@ async function executeExport() {
     });
     rows.push(headers.join(separator));
 
-    // Process each record
     records.forEach(record => {
         const row = selectedColumns.map(col => {
             let value = record[col] || 'N/A';
             
-            // Format specific fields
             if (col === 'phone_numbers') {
                 value = Array.isArray(value) ? 
                     value.join('; ').replace(/\r?\n|\r/g, ' ') : 
@@ -871,19 +833,17 @@ async function executeExport() {
                     .join('; ') : 'N/A';
             }
 
-            // Clean up the value
             value = value.toString()
-                .replace(/\r?\n|\r/g, ' ')  // Replace newlines with spaces
-                .replace(/\s+/g, ' ')        // Collapse multiple spaces
-                .trim();                     // Trim whitespace
+                .replace(/\r?\n|\r/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
 
-            // Handle CSV escaping
             if (format === 'csv') {
                 if (value.includes('"')) {
-                    value = value.replace(/"/g, '""'); // Escape double quotes
+                    value = value.replace(/"/g, '""');
                 }
                 if (value.includes(',')) {
-                    value = `"${value}"`; // Wrap in quotes if contains separator
+                    value = `"${value}"`;
                 }
             }
 
@@ -896,7 +856,6 @@ async function executeExport() {
     const fileType = format === 'csv' ? 'text/csv' : 'text/plain';
     const fileExtension = format === 'csv' ? 'csv' : format === 'tsv' ? 'tsv' : 'txt';
 
-    // Save file
     try {
         if ('showSaveFilePicker' in window) {
             const fileHandle = await window.showSaveFilePicker({
@@ -910,7 +869,6 @@ async function executeExport() {
             await writableStream.write(fileContent);
             await writableStream.close();
         } else {
-            // Fallback for browsers without File System Access API
             const blob = new Blob([fileContent], { type: `${fileType};charset=utf-8;` });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -932,7 +890,6 @@ async function executeExport() {
         }
     }
 
-    // Close modal
     const modal = bootstrap.Modal.getInstance(document.getElementById('exportFormatModal'));
     modal.hide();
 }
@@ -957,7 +914,6 @@ async function getFilteredRecords() {
 }
 
 function loadSettings() {
-    // Load both settings and modules to group settings by module
     Promise.all([
         fetch('/get_settings').then(response => response.json()),
         fetch('/get_modules').then(response => response.json())
@@ -967,27 +923,21 @@ function loadSettings() {
             const settingsContent = document.getElementById('settings-content');
             settingsContent.innerHTML = '';
             
-            // Group settings by module
             const moduleSettings = {};
             const generalSettings = {};
             
-            // Categorize settings
             for (const [key, value] of Object.entries(settingsData.settings)) {
                 if (key === 'house_value' || key === 'search_api_key') {
                     moduleSettings['SearchAPI'] = moduleSettings['SearchAPI'] || {};
                     moduleSettings['SearchAPI'][key] = value;
                 } else if (key === 'threads') {
-                    // threads is a general setting
                     generalSettings[key] = value;
                 } else {
-                    // For now, put everything else in general settings
-                    // In the future, we can expand this to categorize other module settings
                     generalSettings[key] = value;
                 }
             }
             
             
-            // Display SearchAPI module settings first
             if (moduleSettings['SearchAPI']) {
                 const searchAPISettings = moduleSettings['SearchAPI'];
                 const searchAPIModule = modulesData.search_modules?.find(m => m.module_name === 'SearchAPI');
@@ -1004,7 +954,6 @@ function loadSettings() {
                         <div class="card-body">
                 `;
                 
-                // SearchAPI Key
                 if (searchAPISettings['search_api_key'] !== undefined) {
                     searchAPICard += `
                         <div class="mb-3">
@@ -1015,7 +964,6 @@ function loadSettings() {
                     `;
                 }
                 
-                // House Value Toggle
                 if (searchAPISettings['house_value'] !== undefined) {
                     const houseValue = searchAPISettings['house_value'] || '';
                     const isChecked = houseValue && ['true', '1', 'yes', 'on'].includes(houseValue.toLowerCase());
@@ -1040,9 +988,8 @@ function loadSettings() {
                 settingsContent.innerHTML += searchAPICard;
             }
             
-            // Display other module settings
             for (const [moduleName, settings] of Object.entries(moduleSettings)) {
-                if (moduleName === 'SearchAPI') continue; // Already handled above
+                if (moduleName === 'SearchAPI') continue;
                 
                 const module = modulesData.search_modules?.find(m => m.module_name === moduleName) || 
                               modulesData.validmail_modules?.find(m => m.module_name === moduleName);
@@ -1078,7 +1025,6 @@ function loadSettings() {
                 }
             }
             
-            // Display general settings
             if (Object.keys(generalSettings).length > 0) {
                 let generalCard = `
                     <div class="card mb-4">
@@ -1124,7 +1070,6 @@ function saveSettings() {
         settings[key] = value;
     });
     
-    // Handle checkbox values (convert checked/unchecked to true/false)
     const checkboxes = document.querySelectorAll('#settings-content input[type="checkbox"]');
     checkboxes.forEach(checkbox => {
         settings[checkbox.name] = checkbox.checked ? 'true' : 'false';
@@ -1197,26 +1142,27 @@ function toggleSelectAll() {
 }
 
 async function performLookup() {
+    showOverlay("Starting email lookup...");
+    
     const executeAll = document.getElementById('execute-all').checked;
     const selectedModules = Array.from(document.querySelectorAll('#search-module-selection-body input[type="checkbox"]:checked'))
         .map(checkbox => checkbox.value);
 
     if (selectedModules.length === 0) {
+        closeOverlay();
         showAlert('warning', 'Please select at least one module to run.');
         return;
     }
 
     const selectedEmails = executeAll ? await getAllMatchingEmails() : getSelectedEmails();
     if (selectedEmails.length === 0) {
+        closeOverlay();
         showAlert('warning', 'Please select at least one email to perform the check.');
         return;
     }
-
-    // Set loading state for submit button
     const submitBtn = document.getElementById('search-modal-submit-btn');
     setButtonLoading(submitBtn, true);
 
-    showOverlay("Starting email lookup...");
     initializeStats(selectedEmails.length);
     $('#searchModal').modal('hide');
 
@@ -1236,14 +1182,15 @@ async function performLookup() {
         if (response.ok) {
             showAlert('success', `Search completed! Processing ${selectedEmails.length} emails.`);
         } else {
+            closeOverlay();
             showAlert('error', 'An error occurred during the search.');
         }
     } catch (error) {
         console.error('Error during Search:', error);
+        closeOverlay();
         showAlert('error', 'An error occurred. Please try again.');
     } finally {
         setButtonLoading(submitBtn, false);
-        closeOverlay();
     }
 }
 
@@ -1263,7 +1210,6 @@ function resetFilters() {
   document.getElementById('has-address').checked = false;
   document.getElementById('has-dob').checked = false;
   
-  // Reset new SearchAPI filter options
   document.getElementById('has-zestimate').checked = false;
   document.getElementById('has-alternative-names').checked = false;
   document.getElementById('has-multiple-addresses').checked = false;
@@ -1282,7 +1228,6 @@ function resetFilters() {
 function applyFilters() {
     currentFilters = {};
     
-    // Ensure module filters are populated if they don't exist yet
     const moduleFilter = document.getElementById('module-filter');
     const vmModuleFilter = document.getElementById('vm-module-filter');
     if ((moduleFilter && moduleFilter.children.length === 0) || (vmModuleFilter && vmModuleFilter.children.length === 0)) {
@@ -1308,7 +1253,6 @@ function applyFilters() {
       currentFilters.has_dob = true;
     }
     
-    // New SearchAPI filter options
     if (document.getElementById('has-zestimate').checked) {
       currentFilters.has_zestimate = true;
     }
@@ -1319,7 +1263,6 @@ function applyFilters() {
       currentFilters.has_multiple_addresses = true;
     }
     
-    // Zestimate range filters
     const zestimateMin = document.getElementById('zestimate-min').value;
     const zestimateMax = document.getElementById('zestimate-max').value;
     if (zestimateMin) currentFilters.zestimate_min = zestimateMin;
@@ -1330,7 +1273,6 @@ function applyFilters() {
       currentFilters.vm_status = vmStatus;
     }
     
-    // Handle module filtering (only if element exists)
     if (moduleFilter) {
       const selectedModules = Array.from(moduleFilter.selectedOptions)
         .map(option => option.value);
@@ -1338,12 +1280,11 @@ function applyFilters() {
       if (selectedModules.length > 0) {
         currentFilters.module_results = {};
         selectedModules.forEach(module => {
-          currentFilters.module_results[module] = true; // Default to valid
+          currentFilters.module_results[module] = true;
         });
       }
     }
     
-    // Handle VM module specific filtering (only if elements exist)
     const vmModuleStatusElement = document.getElementById('vm-module-status');
     
     if (vmModuleFilter && vmModuleStatusElement) {
@@ -1371,21 +1312,17 @@ function applyFilters() {
             }).join('<br>') :
             'N/A';
 
-          // Format alternative names
           const altNamesDisplay = record.alternative_names && record.alternative_names.length > 0 ?
               record.alternative_names.slice(0, 2).join(', ') + (record.alternative_names.length > 2 ? ` +${record.alternative_names.length - 2} more` : '') : 
               'N/A';
   
-          // Format addresses and zestimates in single row with clear pairing
           const addresses = record.addresses_list && record.addresses_list.length > 0 ? record.addresses_list : [record.address || 'N/A'];
           const zestimates = record.zestimate_values && record.zestimate_values.length > 0 ? record.zestimate_values : [null];
           
-          // Format addresses display with numbering
           const addressDisplay = addresses.map((address, index) => 
               `<div class="address-item"><strong>Address ${index + 1}:</strong> ${address}</div>`
           ).join('');
           
-          // Format zestimates display with corresponding numbering
           const zestimateDisplay = zestimates.map((zestimate, index) => {
               const zestimateValue = (zestimate !== null && zestimate !== undefined && zestimate !== 'None') ? 
                   `$${zestimate.toLocaleString()}` : 'N/A';
@@ -1411,7 +1348,6 @@ function applyFilters() {
         totalRecordsElem.textContent = totalRecords;
         updatePagination();
         populateStatusOptions(data.statuses);
-        // Only populate module filters if elements exist
         if (document.getElementById('module-filter') && document.getElementById('vm-module-filter')) {
             populateModuleFilter();
         }
@@ -1450,7 +1386,7 @@ async function deleteSelectedRecords() {
         const result = await response.json();
         if (result.success) {
             alert(`Successfully deleted ${result.deleted_count} record(s)`);
-            fetchRecords(currentPage, currentFilters); // Refresh the table
+            fetchRecords(currentPage, currentFilters);
         } else {
             alert('Error deleting records: ' + result.message);
         }
@@ -1482,7 +1418,7 @@ async function deleteFilteredRecords() {
         const result = await response.json();
         if (result.success) {
             alert(`Successfully deleted ${result.deleted_count} record(s)`);
-            fetchRecords(1, currentFilters); // Reset to first page and refresh
+            fetchRecords(1, currentFilters);
         } else {
             alert('Error deleting records: ' + result.message);
         }
@@ -1509,7 +1445,7 @@ async function clearAllRecords() {
         const result = await response.json();
         if (result.success) {
             alert('Successfully cleared all records');
-            fetchRecords(1); // Reset to first page with no filters
+            fetchRecords(1);
         } else {
             alert('Error clearing records: ' + result.message);
         }
@@ -1545,7 +1481,6 @@ async function populateModuleFilter() {
                     moduleFilter.appendChild(option);
                 }
                 
-                // Also add to VM module filter
                 if (vmModuleFilter) {
                     const vmOption = document.createElement('option');
                     vmOption.value = module.module_name;
@@ -1650,7 +1585,6 @@ function fetchThreadsSetting() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Initialize theme
     initializeTheme();
     
     fetchRecords();
@@ -1672,7 +1606,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         updateProgress(data.status);
         
-        // Close overlay when task is completed
         if (data.status && (data.status.includes('completed') || data.status.includes('finished'))) {
             setTimeout(() => {
                 closeOverlay();
@@ -1689,22 +1622,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const row = document.getElementById(`email-${escapedEmail}`);
 
         if (row) {
-            // Get table cells by index (since we don't have specific IDs)
             const cells = row.querySelectorAll('td');
             
-            // Update status (3rd column, index 2)
             if (cells[2]) {
                 const statusBadge = getStatusBadge(result.status || 'pending');
                 cells[2].innerHTML = statusBadge;
             }
             
-            // Update name (4th column, index 3)
             if (cells[3]) {
                 const nameDisplay = result.name || 'N/A';
                 cells[3].innerHTML = `<div class="text-truncate" style="max-width: 150px;" title="${nameDisplay}">${nameDisplay === 'N/A' ? '<span class="text-muted">N/A</span>' : nameDisplay}</div>`;
             }
             
-            // Update phone numbers (5th column, index 4)
             if (cells[4]) {
                 const phoneDisplay = result.phone_numbers ? 
                     (Array.isArray(result.phone_numbers) ? result.phone_numbers.join(', ') : result.phone_numbers) :
@@ -1712,7 +1641,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 cells[4].innerHTML = `<div class="text-truncate" style="max-width: 150px;" title="${phoneDisplay}">${phoneDisplay === 'N/A' ? '<span class="text-muted">N/A</span>' : phoneDisplay}</div>`;
             }
             
-            // Update address (6th column, index 5)
             if (cells[5]) {
                 const addresses = result.addresses_list && result.addresses_list.length > 0 ? result.addresses_list : [result.address || 'N/A'];
                 const addressDisplay = addresses.length > 0 ? 
@@ -1723,13 +1651,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 cells[5].innerHTML = addressDisplay;
             }
             
-            // Update DOB (7th column, index 6)
             if (cells[6]) {
                 const dobDisplay = result.dob || 'N/A';
                 cells[6].innerHTML = `<div class="text-truncate" style="max-width: 100px;" title="${dobDisplay}">${dobDisplay === 'N/A' ? '<span class="text-muted">N/A</span>' : dobDisplay}</div>`;
             }
             
-            // Update zestimate (8th column, index 7)
             if (cells[7]) {
                 const zestimates = result.zestimate_values && result.zestimate_values.length > 0 ? result.zestimate_values : [null];
                 const zestimateDisplay = zestimates.length > 0 && zestimates[0] !== null && zestimates[0] !== undefined && zestimates[0] !== 'None' ? 
@@ -1739,7 +1665,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 cells[7].innerHTML = zestimateDisplay;
             }
             
-            // Update alternative names (9th column, index 8)
             if (cells[8]) {
                 const altNamesDisplay = result.alternative_names && result.alternative_names.length > 0 ?
                     result.alternative_names.slice(0, 2).join(', ') + (result.alternative_names.length > 2 ? ` +${result.alternative_names.length - 2} more` : '') : 
@@ -1747,7 +1672,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 cells[8].innerHTML = `<div class="text-truncate" style="max-width: 150px;" title="${altNamesDisplay}">${altNamesDisplay === 'N/A' ? '<span class="text-muted">N/A</span>' : altNamesDisplay}</div>`;
             }
             
-            // Update validation results (10th column, index 9)
             if (cells[9]) {
                 if (result.validmail_results) {
                     const formattedValidmailResults = Object.entries(result.validmail_results).map(([module, result]) => {

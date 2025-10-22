@@ -1,6 +1,10 @@
 import requests
 import json
+import ssl
+import urllib3
 from typing import Optional, Dict, List
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 class SearchAPIProcessor:
     name = "Search-API - @ADSearchEngine_bot"
@@ -16,10 +20,8 @@ class SearchAPIProcessor:
         if not api_key:
             raise ValueError("Search API key not found in settings")
 
-        # Check if house value features are enabled
         house_value_enabled = settings.get('house_value', 'false').lower() in ['true', '1', 'yes', 'on']
         
-        # Build URL with house_value parameter
         url = f'https://search-api.dev/search.php?email={email}&api_key={api_key}&extra_info=True&house_value={"True" if house_value_enabled else "False"}'
         print(f"SearchAPI URL: {url}")
         
@@ -29,10 +31,31 @@ class SearchAPIProcessor:
         }
 
         try:
-            response = requests.get(
+            session = requests.Session()
+            
+            retry_strategy = Retry(
+                total=3,
+                backoff_factor=1,
+                status_forcelist=[429, 500, 502, 503, 504],
+                allowed_methods=["HEAD", "GET", "OPTIONS"]
+            )
+            
+            adapter = HTTPAdapter(max_retries=retry_strategy)
+            session.mount("http://", adapter)
+            session.mount("https://", adapter)
+            
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            
+            response = session.get(
                 url, 
                 headers=headers, 
-                timeout=30
+                timeout=30,
+                verify=False,
+                stream=False
             )
 
             response.raise_for_status()
@@ -43,22 +66,19 @@ class SearchAPIProcessor:
             data = response.json()
             print(f"SearchAPI raw data for {email}: {json.dumps(data, indent=2)}")
             
-            # Extract basic information
             addresses = data.get("addresses", [])
             addresses_structured = data.get("addresses_structured", [])
             alternative_names = data.get("alternative_names", [])
             
-            # Get primary address for backward compatibility
             address = ""
             if isinstance(addresses, list) and addresses:
                 for addr in addresses:
-                    if addr and addr.strip():
+                    if addr and isinstance(addr, str) and addr.strip():
                         address = addr.strip()
                         break
             elif isinstance(addresses, str) and addresses.strip():
                 address = addresses.strip()
             
-            # Extract zestimate values and property details if house value is enabled
             zestimate_values = []
             property_details = []
             
@@ -67,14 +87,12 @@ class SearchAPIProcessor:
                     if isinstance(addr_struct, dict) and 'components' in addr_struct:
                         components = addr_struct['components']
                         
-                        # Extract zestimate
                         zestimate = components.get('zestimate')
                         if zestimate is not None:
                             zestimate_values.append(zestimate)
                         else:
                             zestimate_values.append(None)
                         
-                        # Extract property details
                         prop_details = components.get('property_details', {})
                         if prop_details:
                             property_details.append(prop_details)
@@ -114,8 +132,17 @@ class SearchAPIProcessor:
             else:
                 return None
 
+        except requests.exceptions.SSLError as e:
+            print(f"SSL Error fetching details for {email}: {str(e)}")
+            return None
+        except requests.exceptions.ConnectionError as e:
+            print(f"Connection Error fetching details for {email}: {str(e)}")
+            return None
+        except requests.exceptions.Timeout as e:
+            print(f"Timeout Error fetching details for {email}: {str(e)}")
+            return None
         except requests.exceptions.RequestException as e:
-            print(f"Error fetching details for {email}: {str(e)}")
+            print(f"Request Error fetching details for {email}: {str(e)}")
             return None
         except Exception as e:
             print(f"Unexpected error for {email}: {str(e)}")

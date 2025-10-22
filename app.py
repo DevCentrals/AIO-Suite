@@ -36,8 +36,8 @@ _performance_lock = threading.Lock()
 def _cached_email_validation(email: str) -> bool:
     return bool(_email_regex.match(email))
 
+@lru_cache(maxsize=1)
 def validate_proxies():
-    global _proxy_cache
     try:
         if not os.path.exists('proxies.txt'):
             print("WARNING: proxies.txt file not found!")
@@ -62,8 +62,6 @@ def validate_proxies():
             print("Please provide proxies in proxies.txt with format: username:password@host:port")
             print("Application will continue but some features may not work properly.")
             return False
-        
-        _proxy_cache = [f"http://{line.strip()}" for line in lines if line.strip() and '@' in line and ':' in line]
         
         print(f"Found {valid_proxies} valid proxies in proxies.txt")
         return True
@@ -123,46 +121,111 @@ def detect_python314_features():
 def get_optimized_config():
     features = detect_python314_features()
     
+    # Base configuration optimized for performance
     config = {
         'SQLALCHEMY_ENGINE_OPTIONS': {
-            'pool_size': 20,
-            'max_overflow': 30,
-            'pool_timeout': 60,
-            'pool_recycle': 1800,
+            'pool_size': 30 if features['is_python314'] else 20,  # Larger pool for 3.14
+            'max_overflow': 50 if features['is_python314'] else 30,  # More overflow connections
+            'pool_timeout': 30 if features['is_python314'] else 60,  # Faster timeout
+            'pool_recycle': 3600 if features['is_python314'] else 1800,  # Longer recycle time
             'pool_pre_ping': True,
-        }
+            'echo': False,  # Disable SQL logging for performance
+        },
+        'SQLALCHEMY_TRACK_MODIFICATIONS': False,
+        'JSONIFY_PRETTYPRINT_REGULAR': False,  # Disable pretty printing
     }
     
+    # SQLite-specific optimizations for Python 3.14
     if features['is_python314']:
+        config['SQLALCHEMY_ENGINE_OPTIONS']['connect_args'] = {
+            'check_same_thread': False,
+            'timeout': 20,  # Faster timeout
+            'isolation_level': None,  # Disable isolation for better performance
+        }
+    
+    if features['is_python314']:
+        # Enable free-threaded mode optimizations
         if features['free_threaded']:
-            config['SQLALCHEMY_ENGINE_OPTIONS']['connect_args'] = {
-                'check_same_thread': False,
-                'timeout': 30
+            config['THREADING_OPTIONS'] = {
+                'use_free_threaded': True,
+                'max_workers': 500,  # Much higher worker count for 3.14
+                'thread_pool_size': 1000,
             }
         
+        # Multiple interpreters for CPU-bound tasks
         if features['multiple_interpreters']:
             config['INTERPRETER_OPTIONS'] = {
                 'use_multiple_interpreters': True,
-                'max_interpreters': 4
+                'max_interpreters': 6,  # Increase interpreter count
+                'interpreter_pool_size': 8,
             }
         
+        # Compression for large data transfers
         if features['zstandard']:
             config['COMPRESSION_OPTIONS'] = {
                 'use_zstandard': True,
-                'compression_level': 6
+                'compression_level': 3,  # Lower compression for speed
+                'compress_threshold': 1024,  # Only compress larger data
             }
+        
+        # Memory optimization
+        config['MEMORY_OPTIONS'] = {
+            'use_memory_mapping': True,
+            'cache_size': 10000,  # Larger cache
+            'page_size': 4096,
+        }
     
     return config
+
+def optimize_sqlite_for_python314():
+    if not python314_features['is_python314']:
+        return
+    
+    try:
+        with db.engine.connect() as conn:
+            conn.execute(db.text("PRAGMA journal_mode=WAL"))
+            
+            conn.execute(db.text("PRAGMA cache_size=-64000"))
+            conn.execute(db.text("PRAGMA temp_store=MEMORY"))
+            conn.execute(db.text("PRAGMA mmap_size=268435456"))
+            
+            conn.execute(db.text("PRAGMA foreign_keys=OFF"))
+            conn.execute(db.text("PRAGMA count_changes=OFF"))
+            conn.execute(db.text("PRAGMA fullfsync=OFF"))
+            conn.execute(db.text("PRAGMA checkpoint_fullfsync=OFF"))
+            
+            conn.execute(db.text("PRAGMA page_size=4096"))
+            conn.execute(db.text("PRAGMA locking_mode=NORMAL"))
+            conn.execute(db.text("PRAGMA synchronous=NORMAL"))
+            
+            conn.commit()
+    except Exception as e:
+        print(f"⚠️  Warning: Could not apply SQLite optimizations: {e}")
+        print("   Application will continue with default SQLite settings")
 
 python314_features = detect_python314_features()
 optimized_config = get_optimized_config()
 
 def get_optimization_status():
+    features = detect_python314_features()
+    config = get_optimized_config()
+    
+    pool_size = config['SQLALCHEMY_ENGINE_OPTIONS']['pool_size']
+    max_overflow = config['SQLALCHEMY_ENGINE_OPTIONS']['max_overflow']
+    
     return {
         'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
-        'is_python314': python314_features['is_python314'],
-        'available_features': {k: v for k, v in python314_features.items() if k != 'is_python314'},
-        'optimizations_applied': list(optimized_config.keys()),
+        'is_python314': features['is_python314'],
+        'available_features': {k: v for k, v in features.items() if k != 'is_python314'},
+        'optimizations_applied': list(config.keys()),
+        'performance_metrics': {
+            'connection_pool_size': pool_size,
+            'max_overflow_connections': max_overflow,
+            'total_connections': pool_size + max_overflow,
+            'thread_optimization': features['is_python314'],
+            'batch_size_optimization': features['is_python314'],
+            'optimization_level': 'high' if features['is_python314'] else 'standard',
+        },
         'cached_modules': len(ModuleLoader._module_cache),
         'cached_search_modules': len(SearchProcessor._search_modules_cache) if SearchProcessor._search_modules_cache else 0
     }
@@ -191,8 +254,6 @@ app.config['SECRET_KEY'] = '67a5a25c-7acc-800f-bff4-1b84e2762944'
 app.config['ALLOW_REGISTRATION'] = False
 
 app.config.update(optimized_config)
-
-validate_proxies()
 
 if python314_features['is_python314']:
     print("Python 3.14 detected - optimizations enabled")
@@ -338,8 +399,7 @@ def get_first_string(val):
 @app.route('/')
 @login_required
 def index():
-    emails = Email.query.all()
-    return render_template('index.html', emails=emails)
+    return render_template('index.html')
 
 @app.route('/health')
 def health_check():
@@ -387,7 +447,6 @@ def upload_emails():
             
             if valid_emails:
                 try:
-                    # Use bulk operations for maximum performance
                     db.session.bulk_save_objects(valid_emails)
                     db.session.commit()
                     with _performance_lock:
@@ -398,17 +457,15 @@ def upload_emails():
         
         return redirect(url_for('index'))
     
-# Cache module info for better performance
 _module_info_cache = None
 _module_info_cache_time = 0
-CACHE_DURATION = 300  # 5 minutes
+CACHE_DURATION = 300
 
 @app.route('/get_modules')
 @login_required
 def get_modules():
     global _module_info_cache, _module_info_cache_time
     
-    # Use cached data if available and not expired
     current_time = time.time()
     if _module_info_cache and (current_time - _module_info_cache_time) < CACHE_DURATION:
         return jsonify(_module_info_cache)
@@ -466,7 +523,6 @@ def get_modules():
             'search_modules': search_modules_info
         }
         
-        # Cache the result
         _module_info_cache = result
         _module_info_cache_time = current_time
         
@@ -486,7 +542,12 @@ def perform_vm_check():
     loaded_modules = ModuleLoader.load_modules('validmail_modules')
     proxies = load_all_proxies()
     settings = Settings.get_all_settings()
-    max_concurrent_tasks = int(settings.get('threads', 10))
+    
+    base_threads = int(settings.get('threads', 10))
+    if python314_features['is_python314']:
+        max_concurrent_tasks = min(base_threads * 50, 500)
+    else:
+        max_concurrent_tasks = base_threads
 
     socketio.emit('task_status', {
         'status': 'started',
@@ -506,8 +567,12 @@ def perform_vm_check():
                 if Settings.get_setting(setting) is not None
             }
 
-    # Pre-load all email records for better performance
-    email_records = {email.email: email for email in db.session.query(Email).filter(Email.email.in_(emails_to_lookup)).all()}
+    email_records = {}
+    batch_size = 500
+    for i in range(0, len(emails_to_lookup), batch_size):
+        batch_emails = emails_to_lookup[i:i + batch_size]
+        batch_records = {email.email: email for email in db.session.query(Email).filter(Email.email.in_(batch_emails)).all()}
+        email_records.update(batch_records)
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent_tasks) as executor:
         futures = {}
@@ -642,7 +707,14 @@ def perform_lookup():
         
         proxies = load_all_proxies()
         settings = Settings.get_all_settings()
-        max_concurrent_tasks = int(settings.get('threads', 10))
+        
+        # Optimize thread count for Python 3.14
+        base_threads = int(settings.get('threads', 10))
+        if python314_features['is_python314']:
+            # Python 3.14 can handle much higher concurrency
+            max_concurrent_tasks = min(base_threads * 50, 500)  # Much higher limit for 3.14
+        else:
+            max_concurrent_tasks = base_threads
 
         socketio.emit('task_status', {
             'status': 'started',
@@ -653,11 +725,20 @@ def perform_lookup():
         skipped_count = 0
         error_count = 0
         
-        # Pre-load all email records in one query for better performance
-        email_records = {email.email: email for email in db.session.query(Email).filter(Email.email.in_(emails_to_lookup)).all()}
+        email_records = {}
+        if python314_features['is_python314']:
+            db_batch_size = 800
+        else:
+            db_batch_size = 500
+        for i in range(0, len(emails_to_lookup), db_batch_size):
+            batch_emails = emails_to_lookup[i:i + db_batch_size]
+            batch_records = {email.email: email for email in db.session.query(Email).filter(Email.email.in_(batch_emails)).all()}
+            email_records.update(batch_records)
         
-        # Process emails in smaller batches to avoid overwhelming the system
-        batch_size = 500
+        if python314_features['is_python314']:
+            batch_size = 1000
+        else:
+            batch_size = 500
         total_emails = len(emails_to_lookup)
         
         for batch_start in range(0, total_emails, batch_size):
@@ -681,7 +762,6 @@ def perform_lookup():
                     else:
                         print(f"Warning: Email {email} not found in database, skipping...")
                         skipped_count += 1
-                        # Emit a result for emails not found in database
                         socketio.emit('email_result', {
                             'email': email,
                             'name': 'N/A',
@@ -712,15 +792,23 @@ def perform_lookup():
 
         socketio.emit('task_status', {'status': 'Task completed, check results.'})
         
-        # Batch update status for better performance
         try:
             with app.app_context():
-                # Update all pending emails to "Searched" in one query
-                db.session.query(Email).filter(
-                    Email.email.in_(emails_to_lookup),
-                    Email.status == "pending"
-                ).update({"status": "Searched"}, synchronize_session=False)
-                db.session.commit()
+                if python314_features['is_python314']:
+                    batch_size = 1000
+                    for i in range(0, len(emails_to_lookup), batch_size):
+                        batch_emails = emails_to_lookup[i:i + batch_size]
+                        db.session.query(Email).filter(
+                            Email.email.in_(batch_emails),
+                            Email.status == "pending"
+                        ).update({"status": "Searched"}, synchronize_session=False)
+                        db.session.commit()
+                else:
+                    db.session.query(Email).filter(
+                        Email.email.in_(emails_to_lookup),
+                        Email.status == "pending"
+                    ).update({"status": "Searched"}, synchronize_session=False)
+                    db.session.commit()
         except Exception as e:
             print(f"Error updating email statuses: {e}")
             db.session.rollback()
@@ -813,10 +901,8 @@ def process_email_for_lookup(app, email: str, proxies: List[str], settings: Dict
                         for num in merged_result['phone_numbers']
                     ]
             
-            # Get email record for result emission
             email_record = db.session.query(Email).filter_by(email=email).first()
             
-            # Save results to database - batch update for better performance
             if merged_result:
                 try:
                     update_data = {}
@@ -829,7 +915,6 @@ def process_email_for_lookup(app, email: str, proxies: List[str], settings: Dict
                     if merged_result.get('phone_numbers'):
                         update_data['phone_numbers'] = "; ".join(merged_result['phone_numbers'])
                     
-                    # Handle enhanced SearchAPI data
                     if merged_result.get('addresses_list'):
                         update_data['addresses_list'] = merged_result['addresses_list']
                     if merged_result.get('addresses_structured'):
@@ -927,10 +1012,8 @@ def get_emails():
         try:
             min_value = int(filters['zestimate_min'])
             print(f"DEBUG - Applying zestimate_min filter: {min_value}")
-            # Check if any zestimate value meets the minimum criteria
-            # Use OR conditions to check each array element
             conditions = []
-            for i in range(10):  # Check up to 10 elements
+            for i in range(10):
                 conditions.append(
                     func.json_extract(Email.zestimate_values, f'$[{i}]').cast(db.Integer) >= min_value
                 )
@@ -943,10 +1026,8 @@ def get_emails():
         try:
             max_value = int(filters['zestimate_max'])
             print(f"DEBUG - Applying zestimate_max filter: {max_value}")
-            # Check if any zestimate value meets the maximum criteria
-            # Use OR conditions to check each array element
             conditions = []
-            for i in range(10):  # Check up to 10 elements
+            for i in range(10):
                 conditions.append(
                     func.json_extract(Email.zestimate_values, f'$[{i}]').cast(db.Integer) <= max_value
                 )
@@ -955,18 +1036,15 @@ def get_emails():
         except (ValueError, TypeError):
             pass
     
-    # Filter by alternative names
     if filters.get('has_alternative_names'):
         query = query.filter(Email.alternative_names != None, Email.alternative_names != '[]')
     
-    # Filter by multiple addresses
     if filters.get('has_multiple_addresses'):
         query = query.filter(Email.addresses_list != None, Email.addresses_list != '[]')
 
     if filters.get('vm_status'):
         vm_status = filters['vm_status']
         if vm_status == 'not-checked':
-            # Emails that haven't been VM checked (no validmail_results or empty)
             query = query.filter(
                 (Email.validmail_results == None) | 
                 (Email.validmail_results == '') |
@@ -993,7 +1071,6 @@ def get_emails():
                 func.json_extract(Email.validmail_results, '$') != '{}'
             )
 
-    # Filter by specific VM module results (consolidated from both module_results and vm_module_results)
     module_results = {}
     if filters.get('module_results'):
         module_results.update(filters['module_results'])
@@ -1002,7 +1079,7 @@ def get_emails():
     
     if module_results:
         for module_name, is_valid in module_results.items():
-            if is_valid is not None:  # Only apply filter if value is explicitly set
+            if is_valid is not None:
                 query = query.filter(
                     func.json_extract(Email.validmail_results, f'$.{module_name}').cast(db.Boolean) == (True if is_valid else False)
                 )
@@ -1033,7 +1110,6 @@ def delete_records():
         delete_type = data.get('delete_type')
         
         if delete_type == 'selected':
-            # Delete specific emails
             emails = data.get('emails', [])
             if not emails:
                 return jsonify({'success': False, 'message': 'No emails provided'}), 400
@@ -1041,7 +1117,6 @@ def delete_records():
             result = Email.query.filter(Email.email.in_(emails)).delete(synchronize_session='fetch')
             
         elif delete_type == 'filtered':
-            # Delete based on filters
             filters = data.get('filters', {})
             query = Email.query
             
@@ -1049,7 +1124,6 @@ def delete_records():
                 query = query.filter(Email.domain.ilike(f"%{filters['domain']}%"))
             if filters.get('status'):
                 query = query.filter(Email.status == filters['status'])
-            # Filter by specific VM module results (consolidated from both module_results and vm_module_results)
             module_results = {}
             if filters.get('module_results'):
                 module_results.update(filters['module_results'])
@@ -1058,7 +1132,7 @@ def delete_records():
             
             if module_results:
                 for module_name, is_valid in module_results.items():
-                    if is_valid is not None:  # Only apply filter if value is explicitly set
+                    if is_valid is not None:
                         query = query.filter(
                             func.json_extract(Email.validmail_results, f'$.{module_name}').cast(db.Boolean) == (True if is_valid else False)
                         )
@@ -1066,13 +1140,11 @@ def delete_records():
             result = query.delete(synchronize_session='fetch')
             
         elif delete_type == 'all':
-            # Delete all records
             result = Email.query.delete(synchronize_session='fetch')
             
         else:
             return jsonify({'success': False, 'message': 'Invalid delete type'}), 400
         
-        # Commit the changes
         db.session.commit()
         
         return jsonify({
@@ -1113,15 +1185,24 @@ def perform_recovery_check():
         }
 
     settings = Settings.get_all_settings()
-    max_concurrent_tasks = int(settings.get('threads', 10))
+    
+    base_threads = int(settings.get('threads', 10))
+    if python314_features['is_python314']:
+        max_concurrent_tasks = min(base_threads * 50, 500)
+    else:
+        max_concurrent_tasks = base_threads
 
     socketio.emit('task_status', {
         'status': 'started',
         'total': len(emails_to_lookup)
     })
 
-    # Pre-load all email records for better performance
-    email_records = {email.email: email for email in db.session.query(Email).filter(Email.email.in_(emails_to_lookup)).all()}
+    email_records = {}
+    batch_size = 500
+    for i in range(0, len(emails_to_lookup), batch_size):
+        batch_emails = emails_to_lookup[i:i + batch_size]
+        batch_records = {email.email: email for email in db.session.query(Email).filter(Email.email.in_(batch_emails)).all()}
+        email_records.update(batch_records)
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent_tasks) as executor:
         futures = {}
@@ -1149,7 +1230,6 @@ def perform_recovery_check():
 
 def process_email_for_recovery_check(app, email_record, loaded_modules, additional_modules, proxies, module_settings, max_retries=3):
     def process_with_module(module_instance, task_obj, module_name, proxy_retry_count=0):
-        """Helper function to process email with a given module instance"""
         while proxy_retry_count < max_retries:
             try:
                 module_specific_settings = module_settings.get(module_name, {})
@@ -1357,10 +1437,13 @@ def clear_caches_endpoint():
 @app.route('/api/performance-stats', methods=['GET'])
 @login_required
 def performance_stats():
-    """Get performance statistics."""
+    """Get comprehensive performance statistics."""
     try:
         with _performance_lock:
             stats = dict(_performance_stats)
+        
+        # Add optimization status
+        optimization_status = get_optimization_status()
         
         # Add cache statistics
         stats.update({
@@ -1368,7 +1451,10 @@ def performance_stats():
             'cached_search_modules': len(SearchProcessor._search_modules_cache) if SearchProcessor._search_modules_cache else 0,
             'cached_processors': len(SearchProcessor._processor_instances),
             'cached_proxies': len(_proxy_cache) if _proxy_cache else 0,
-            'module_info_cache_age': time.time() - _module_info_cache_time if _module_info_cache else 0
+            'module_info_cache_age': time.time() - _module_info_cache_time if _module_info_cache else 0,
+            'optimization_status': optimization_status,
+            'python_performance_mode': 'optimized' if python314_features['is_python314'] else 'standard',
+            'recommended_threads': min(int(Settings.get_setting('threads', 10)) * 50, 500) if python314_features['is_python314'] else int(Settings.get_setting('threads', 10))
         })
         
         return jsonify({'success': True, 'stats': stats})
@@ -1389,6 +1475,8 @@ if __name__ == "__main__":
     with app.app_context():
         print("Creating database tables...")
         db.create_all()
+        
+        optimize_sqlite_for_python314()
         
         default_settings = {
             'threads': '10',

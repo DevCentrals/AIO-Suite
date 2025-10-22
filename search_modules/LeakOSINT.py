@@ -1,6 +1,8 @@
-import requests, json, re, time
+import requests, json, re, time, ssl, urllib3
 from typing import Optional, Dict
 from datetime import datetime, date
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 ZIP_PATTERN = r'\b\d{5}(-\d{4})?\b'
 STREET_PATTERN = r'\d+\s+[A-Za-z]+(?:\s+[A-Za-z]+)*\s+(?:St|Street|Ave|Avenue|Blvd|Boulevard|Dr|Drive|Rd|Road|Ln|Lane|Ct|Court|Pl|Place|Way|Terrace|Trail|Circle|Square|Pkwy|Parkway)'
@@ -56,11 +58,9 @@ class SearchAPIProcessor:
 
     @staticmethod
     def age_to_dob(age: int) -> str:
-        """Convert age to date of birth (DOB) in YYYY-MM-DD format"""
         try:
             current_year = datetime.now().year
             birth_year = current_year - age
-            # Use January 1st as default date
             dob = date(birth_year, 1, 1)
             return dob.strftime('%Y-%m-%d')
         except (ValueError, TypeError):
@@ -68,23 +68,17 @@ class SearchAPIProcessor:
 
     @staticmethod
     def clean_phone_number(phone: str) -> str:
-        """Clean and format phone number for consistent output"""
-        # Remove all non-digit characters except + at the beginning
         cleaned = re.sub(r'[^\d\+]', '', phone)
         
-        # Handle US phone numbers (10 digits)
         if len(cleaned) == 10 and not cleaned.startswith('+'):
             return f"({cleaned[:3]}) {cleaned[3:6]}-{cleaned[6:]}"
         
-        # Handle US phone numbers with country code (11 digits starting with 1)
         if len(cleaned) == 11 and cleaned.startswith('1'):
             return f"({cleaned[1:4]}) {cleaned[4:7]}-{cleaned[7:]}"
         
-        # Handle international numbers with +
         if cleaned.startswith('+') and len(cleaned) >= 11:
             return cleaned
         
-        # Return as-is if it doesn't match common patterns
         return phone
 
     @staticmethod
@@ -128,19 +122,14 @@ class SearchAPIProcessor:
                             except:
                                 pass
 
-                # Extract ALL phone numbers, not just the first one
                 for phone_key in phone_variations:
                     if phone_key in record_lower:
                         phone = record_lower[phone_key]
                         if phone and isinstance(phone, str):
-                            # Skip masked or invalid phone numbers
                             if not any(x in phone.upper() for x in ['XX', '**', 'NULL', 'NONE', 'N/A']):
-                                # Clean and format the phone number
                                 cleaned_phone = SearchAPIProcessor.clean_phone_number(phone)
-                                # Check if it's a valid phone number format
                                 digits_only = re.sub(r'[^\d]', '', cleaned_phone)
                                 if 7 <= len(digits_only) <= 15:
-                                    # Avoid duplicates
                                     if cleaned_phone not in details['phone_numbers']:
                                         details['phone_numbers'].append(cleaned_phone)
 
@@ -173,30 +162,26 @@ class SearchAPIProcessor:
                         address_details['billing'] = record_lower[addr_key]
                         break
 
-                # Extract age and convert to DOB
                 if not details['age'] and not details['dob']:
                     for age_key in age_variations:
                         if age_key in record_lower:
                             birthdate = record_lower.get(age_key)
                             if birthdate and birthdate != 'NULL':
                                 try:
-                                    # Check if it's already a year (4 digits)
                                     if len(str(birthdate)) == 4 and str(birthdate).isdigit():
                                         birth_year = int(birthdate)
                                         age = datetime.now().year - birth_year
                                         details['age'] = age
                                         details['dob'] = SearchAPIProcessor.age_to_dob(age)
-                                    # Check if it's an age (1-3 digits)
                                     elif str(birthdate).isdigit() and 1 <= int(birthdate) <= 120:
                                         age = int(birthdate)
                                         details['age'] = age
                                         details['dob'] = SearchAPIProcessor.age_to_dob(age)
-                                    # Check if it's a full date format
                                     elif '-' in birthdate:
                                         birth_year = int(birthdate.split('-')[0])
                                         age = datetime.now().year - birth_year
                                         details['age'] = age
-                                        details['dob'] = birthdate  # Use the original date if available
+                                        details['dob'] = birthdate
                                 except:
                                     pass
 
@@ -220,17 +205,30 @@ class SearchAPIProcessor:
             max_retries = 3
             retry_count = 0
             
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            
             while retry_count < max_retries:
                 try:
-                    response = requests.post(url, json=data, proxies={'http': proxy, 'https': proxy}, timeout=10)
-                    #print(response.text)
+                    response = requests.post(
+                        url, 
+                        json=data, 
+                        proxies={'http': proxy, 'https': proxy} if proxy else None, 
+                        timeout=10,
+                        verify=False
+                    )
                     break
+                except requests.exceptions.SSLError as e:
+                    retry_count += 1
+                    print(f"SSL Error during request (attempt {retry_count}/{max_retries}): {e}")
+                    if retry_count >= max_retries:
+                        return None
+                    time.sleep(2)
                 except Exception as e:
                     retry_count += 1
                     print(f"Error during request (attempt {retry_count}/{max_retries}): {e}")
                     if retry_count >= max_retries:
                         return None
-                    time.sleep(2)  # Wait before retry
+                    time.sleep(2)
 
             if 'error' in response.json() and 'You are running too many queries' in response.json()['error']:
                 raise Exception("Ratelimited!")

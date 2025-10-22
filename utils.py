@@ -6,6 +6,7 @@ from functools import lru_cache
 _proxy_cache = None
 _proxy_index = 0
 
+@lru_cache(maxsize=1)
 def load_all_proxies() -> List[str]:
     try:
         with open('proxies.txt', 'r', encoding='utf-8') as f:
@@ -17,6 +18,12 @@ def load_all_proxies() -> List[str]:
             for line in lines 
             if line.strip() and '@' in line and ':' in line
         ]
+        
+        if proxies:
+            print(f"Loaded {len(proxies)} proxies")
+        else:
+            print("Warning: No valid proxies found in proxies.txt")
+            
         return proxies
     except FileNotFoundError:
         print("Warning: proxies.txt not found")

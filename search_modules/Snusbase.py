@@ -1,4 +1,6 @@
 import requests
+import ssl
+import urllib3
 from typing import Optional, Dict, List
 from bs4 import BeautifulSoup
 from colorama import Fore
@@ -13,6 +15,8 @@ class SearchAPIProcessor:
 
     def search(self, email: str, settings: Dict[str, str], proxy: str) -> Optional[Dict]:
         try:
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            
             session = requests.Session()
             api_key = settings.get('snusbase_api_key')
             if not api_key:
@@ -21,7 +25,8 @@ class SearchAPIProcessor:
             response = session.post(
                 "https://www.snusbase.com/search",
                 data={"term": email, "searchtype": "email"},
-                proxies={"http": proxy, "https": proxy} if proxy else None
+                proxies={"http": proxy, "https": proxy} if proxy else None,
+                verify=False
             )
 
             html_data = response.content
