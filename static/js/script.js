@@ -589,10 +589,29 @@ async function showExportFormatModal() {
         exportButton.addEventListener('click', async (event) => {
             try {
                 exportButton.disabled = true;
-                await prepareAndSaveExport();
+                
+                // Get file picker first while we still have user gesture
+                let fileHandle = null;
+                if ('showSaveFilePicker' in window) {
+                    const format = document.getElementById('exportFormat').value;
+                    const fileExtension = format === 'csv' ? 'csv' : format === 'tsv' ? 'tsv' : 'txt';
+                    const fileType = format === 'csv' ? 'text/csv' : 'text/plain';
+                    
+                    fileHandle = await window.showSaveFilePicker({
+                        suggestedName: `export_${new Date().toISOString().slice(0,10)}.${fileExtension}`,
+                        types: [{
+                            description: `${fileExtension.toUpperCase()} File`,
+                            accept: { [fileType]: [`.${fileExtension}`] }
+                        }]
+                    });
+                }
+                
+                await prepareAndSaveExport(fileHandle);
             } catch (error) {
                 console.error('Export failed:', error);
-                alert('Failed to export. Please try again.');
+                if (error.name !== 'AbortError') {
+                    alert('Failed to export. Please try again.');
+                }
             } finally {
                 exportButton.disabled = false;
             }
@@ -603,7 +622,7 @@ async function showExportFormatModal() {
     modal.show();
 }
 
-async function prepareAndSaveExport() {
+async function prepareAndSaveExport(fileHandle = null) {
     const loadingIndicator = document.createElement('div');
     loadingIndicator.textContent = 'Preparing export...';
     loadingIndicator.style.position = 'fixed';
@@ -686,25 +705,14 @@ async function prepareAndSaveExport() {
         const fileType = format === 'csv' ? 'text/csv' : 'text/plain';
         const fileExtension = format === 'csv' ? 'csv' : format === 'tsv' ? 'tsv' : 'txt';
 
-        const confirmSave = confirm(`Export data is ready (${records.length} records). Click OK to save as ${fileExtension.toUpperCase()} file.`);
-        if (!confirmSave) {
-            alert('Export canceled.');
-            return;
-        }
-
         try {
-            if ('showSaveFilePicker' in window) {
-                const fileHandle = await window.showSaveFilePicker({
-                    suggestedName: `export_${new Date().toISOString().slice(0,10)}.${fileExtension}`,
-                    types: [{
-                        description: `${fileExtension.toUpperCase()} File`,
-                        accept: { [fileType]: [`.${fileExtension}`] }
-                    }]
-                });
+            if (fileHandle) {
+                // Use the file handle we got from the user gesture
                 const writableStream = await fileHandle.createWritable();
                 await writableStream.write(fileContent);
                 await writableStream.close();
             } else {
+                // Fallback to download method
                 const blob = new Blob([fileContent], { type: `${fileType};charset=utf-8;` });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -788,6 +796,8 @@ function initializeDragAndDrop() {
 }
 
 async function executeExport() {
+    // This function is deprecated - use prepareAndSaveExport instead
+    // Keeping for backward compatibility but it will use the fallback download method
     const records = await getFilteredRecords();
     if (records.length === 0) {
         alert('No records to export!');
@@ -857,37 +867,23 @@ async function executeExport() {
     const fileExtension = format === 'csv' ? 'csv' : format === 'tsv' ? 'tsv' : 'txt';
 
     try {
-        if ('showSaveFilePicker' in window) {
-            const fileHandle = await window.showSaveFilePicker({
-                suggestedName: `export_${new Date().toISOString().slice(0,10)}.${fileExtension}`,
-                types: [{
-                    description: `${fileExtension.toUpperCase()} File`,
-                    accept: { [fileType]: [`.${fileExtension}`] }
-                }]
-            });
-            const writableStream = await fileHandle.createWritable();
-            await writableStream.write(fileContent);
-            await writableStream.close();
-        } else {
-            const blob = new Blob([fileContent], { type: `${fileType};charset=utf-8;` });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `export_${new Date().toISOString().slice(0,10)}.${fileExtension}`;
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(() => {
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-            }, 100);
-        }
+        // Use fallback download method since this function doesn't have user gesture context
+        const blob = new Blob([fileContent], { type: `${fileType};charset=utf-8;` });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `export_${new Date().toISOString().slice(0,10)}.${fileExtension}`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }, 100);
 
         alert(`Exported ${records.length} records successfully!`);
     } catch (error) {
-        if (error.name !== 'AbortError') {
-            console.error('Error saving file:', error);
-            alert('Failed to save the file. Please try again.');
-        }
+        console.error('Error saving file:', error);
+        alert('Failed to save the file. Please try again.');
     }
 
     const modal = bootstrap.Modal.getInstance(document.getElementById('exportFormatModal'));
