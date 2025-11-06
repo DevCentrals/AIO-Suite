@@ -1277,7 +1277,12 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
             'status': 'Recovery-Checked',
             'phone_numbers': phone_numbers,
             'validmail_results': validmail_results,
-            'processed_modules': [module_name]
+            'processed_modules': [module_name],
+            'addresses_list': email.addresses_list or [],
+            'addresses_structured': email.addresses_structured or [],
+            'zestimate_values': email.zestimate_values or [],
+            'property_details': email.property_details or [],
+            'alternative_names': email.alternative_names or []
         }
         socketio.emit('email_result', {
             **email_result,
@@ -1320,7 +1325,12 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
                 'phone_numbers': [],
                 'validmail_results': validmail_results,
                 'processed_modules': [],
-                'success': False
+                'success': False,
+                'addresses_list': email_record.addresses_list or [],
+                'addresses_structured': email_record.addresses_structured or [],
+                'zestimate_values': email_record.zestimate_values or [],
+                'property_details': email_record.property_details or [],
+                'alternative_names': email_record.alternative_names or []
             }
             socketio.emit('email_result', email_result)
             return []
@@ -1376,7 +1386,12 @@ def process_email_for_recovery_check(app, email_record, loaded_modules, addition
             'phone_numbers': phone_numbers,
             'validmail_results': validmail_results,
             'processed_modules': processed_modules,
-            'success': result_found
+            'success': result_found,
+            'addresses_list': email_record.addresses_list or [],
+            'addresses_structured': email_record.addresses_structured or [],
+            'zestimate_values': email_record.zestimate_values or [],
+            'property_details': email_record.property_details or [],
+            'alternative_names': email_record.alternative_names or []
         }
         socketio.emit('email_result', email_result)
 
